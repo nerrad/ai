@@ -139,21 +139,118 @@ final class Main {
 	 * password-reset, and content-filtering constraints must remain active as
 	 * well. The safeguards only register once an agent may exist, and marking
 	 * the first agent registers them right away, so they are in force for the
-	 * rest of that request too.
+	 * rest of that request too. Until then, any agent that authenticates or
+	 * asks for a password reset registers them before it can act.
 	 *
 	 * @since x.x.x
 	 *
 	 * @internal Public for integration testing.
 	 */
 	public function register_agent_account_safeguards(): void {
-		Agent_Account::register_parent_capability();
+		Agent_Account::register_always_on_rules();
 		add_action( 'added_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
 		add_action( 'updated_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
 
 		if ( ! Agent_Account::agents_may_exist() ) {
+			/*
+			 * An account can still be an agent: marked behind the plugin's back,
+			 * such as with WP-CLI's `--skip-plugins`, or by another network of a
+			 * multi-network install. Whoever authenticates is checked, which is
+			 * a cached meta read, and the safeguards register before the
+			 * plugin's own checks run on the same hook.
+			 */
+			add_action( 'set_current_user', array( $this, 'register_safeguards_for_current_agent' ), 0 );
+			add_filter( 'wp_authenticate_user', array( $this, 'register_safeguards_for_authenticating_agent' ), 0 );
+			add_action( 'wp_authenticate_application_password_errors', array( $this, 'register_safeguards_for_credential_agent' ), 0, 2 );
+			add_filter( 'allow_password_reset', array( $this, 'register_safeguards_for_resetting_agent' ), 0, 2 );
+
+			// Code that ran before the plugin loaded may already have resolved the current user.
+			if ( did_action( 'set_current_user' ) ) {
+				$this->register_safeguards_for_current_agent();
+			}
 			return;
 		}
 
+		$this->register_agent_safeguards_once();
+	}
+
+	/**
+	 * Registers the agent safeguards when the current user turns out to be an agent.
+	 *
+	 * @since x.x.x
+	 *
+	 * @internal Hooked to `set_current_user` while no agent is known.
+	 */
+	public function register_safeguards_for_current_agent(): void {
+		$this->register_safeguards_if_agent( get_current_user_id() );
+	}
+
+	/**
+	 * Registers the agent safeguards before a password login by an agent.
+	 *
+	 * @since x.x.x
+	 *
+	 * @internal Hooked to `wp_authenticate_user` while no agent is known.
+	 *
+	 * @param mixed $user The user logging in, or an error, passed through.
+	 * @return mixed The user or error.
+	 */
+	public function register_safeguards_for_authenticating_agent( $user ) {
+		if ( $user instanceof \WP_User ) {
+			$this->register_safeguards_if_agent( $user->ID );
+		}
+
+		return $user;
+	}
+
+	/**
+	 * Registers the agent safeguards before an agent's Application Password is accepted.
+	 *
+	 * @since x.x.x
+	 *
+	 * @internal Hooked to `wp_authenticate_application_password_errors` while no agent is known.
+	 *
+	 * @param \WP_Error $error Authentication errors, unchanged.
+	 * @param \WP_User  $user  The user authenticating.
+	 */
+	public function register_safeguards_for_credential_agent( $error, $user ): void {
+		if ( ! $user instanceof \WP_User ) {
+			return;
+		}
+
+		$this->register_safeguards_if_agent( $user->ID );
+	}
+
+	/**
+	 * Registers the agent safeguards before an agent's password reset.
+	 *
+	 * @since x.x.x
+	 *
+	 * @internal Hooked to `allow_password_reset` while no agent is known.
+	 *
+	 * @param bool $allow   Whether the reset is allowed, passed through.
+	 * @param int  $user_id The user requesting a reset.
+	 * @return bool Whether the reset is allowed.
+	 */
+	public function register_safeguards_for_resetting_agent( $allow, $user_id ) {
+		$this->register_safeguards_if_agent( (int) $user_id );
+
+		return $allow;
+	}
+
+	/**
+	 * Records that an agent exists and registers the safeguards when the user is one.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param int $user_id User ID.
+	 */
+	private function register_safeguards_if_agent( int $user_id ): void {
+		if ( ! Agent_Account::is_agent( $user_id ) ) {
+			return;
+		}
+
+		update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '1' );
 		$this->register_agent_safeguards_once();
 	}
 
@@ -173,8 +270,7 @@ final class Main {
 			return;
 		}
 
-		update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '1' );
-		$this->register_agent_safeguards_once();
+		$this->register_safeguards_if_agent( (int) $user_id );
 	}
 
 	/**

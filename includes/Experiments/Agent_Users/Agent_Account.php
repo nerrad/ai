@@ -104,15 +104,22 @@ final class Agent_Account {
 	public const AGENTS_EXIST_OPTION = 'wpai_agents_exist';
 
 	/**
-	 * Hooks the rule deciding who may have agents into WordPress.
+	 * Hooks the rules that apply before any agent is known into WordPress.
 	 *
-	 * Unlike the other rules, it is needed before the first agent exists,
-	 * to choose that agent's parent.
+	 * Who may have agents is needed to choose the first agent's parent, and
+	 * which sites an agent may join applies to agents created elsewhere on
+	 * the network, too. Both run rarely.
 	 *
 	 * @since x.x.x
 	 */
-	public static function register_parent_capability(): void {
+	public static function register_always_on_rules(): void {
 		add_filter( 'user_has_cap', array( self::class, 'grant_default_parent_capability' ), 10, 4 );
+
+		if ( ! is_multisite() ) {
+			return;
+		}
+
+		add_filter( 'can_add_user_to_blog', array( self::class, 'keep_agents_on_parent_sites' ), 10, 4 );
 	}
 
 	/**
@@ -120,10 +127,10 @@ final class Agent_Account {
 	 *
 	 * The answer is computed on activation, or on the first request when the
 	 * activation hook never ran, and set again whenever an account is marked
-	 * as an agent. It may stay `true` after the last agent
-	 * is gone, which only keeps the safeguards running; it is never `false`
-	 * while an agent exists, except for agents written straight to the
-	 * database while the plugin was active, which activation detects.
+	 * as an agent. It may stay `true` after the last agent is gone, which only
+	 * keeps the safeguards running. A marker written behind the plugin's back
+	 * is not seen here; such an agent is found when it authenticates, see
+	 * `Main::register_agent_account_safeguards()`, and on activation.
 	 *
 	 * @since x.x.x
 	 *
@@ -187,7 +194,6 @@ final class Agent_Account {
 		}
 
 		add_filter( 'pre_update_site_option_site_admins', array( $this, 'strip_agents_from_super_admins' ) );
-		add_filter( 'can_add_user_to_blog', array( $this, 'keep_agents_on_parent_sites' ), 10, 4 );
 		add_action( 'remove_user_from_blog', array( $this, 'remove_agents_of_removed_user' ), 10, 3 );
 		add_action( 'admin_notices', array( $this, 'render_agents_removed_with_parent' ) );
 		add_action( 'wpmu_delete_user', array( $this, 'delete_agents_of_deleted_network_user' ) );
@@ -1390,7 +1396,7 @@ final class Agent_Account {
 	 * @param int|string     $blog_id Site ID.
 	 * @return true|\WP_Error True, or an error for agents that cannot join the site.
 	 */
-	public function keep_agents_on_parent_sites( $can_add, $user_id, $role, $blog_id ) {
+	public static function keep_agents_on_parent_sites( $can_add, $user_id, $role, $blog_id ) {
 		if ( true !== $can_add || ! self::is_agent( (int) $user_id ) ) {
 			return $can_add;
 		}

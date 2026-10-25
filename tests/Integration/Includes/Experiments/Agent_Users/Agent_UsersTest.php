@@ -2070,6 +2070,74 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that an agent marked behind the plugin's back gets the safeguards whichever way it authenticates.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_agents_marked_behind_the_plugins_back_are_found_on_authentication() {
+		global $wpdb;
+
+		$user_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		wp_set_password( 'known-password', $user_id );
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+		$credential = \WP_Application_Passwords::create_new_application_password( $user_id, array( 'name' => 'Before marking' ) )[0];
+
+		// As with `wp user meta add --skip-plugins`, which runs no plugin hooks.
+		$wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$wpdb->usermeta,
+			array(
+				'user_id'    => $user_id,
+				'meta_key'   => Agent_Account::META_KEY, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+				'meta_value' => '1', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+			)
+		);
+		wp_cache_delete( $user_id, 'user_meta' );
+		$login = get_userdata( $user_id )->user_login;
+
+		// Each path starts from a request on an install that knows no agent.
+		$fresh_request = function (): void {
+			update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '0' );
+			$this->remove_agent_account_safeguards();
+			Main::get_instance()->register_agent_account_safeguards();
+			$this->assertFalse( $this->agent_account_safeguards_registered() );
+		};
+
+		$fresh_request();
+		$blocked = wp_authenticate( $login, 'known-password' );
+		$this->assertWPError( $blocked, 'The agent should not log in with a password.' );
+		$this->assertSame( 'wpai_agent_login_disabled', $blocked->get_error_code() );
+		$this->assertTrue( Agent_Account::agents_may_exist(), 'The agent is remembered.' );
+
+		$fresh_request();
+		$reset = retrieve_password( $login );
+		$this->assertWPError( $reset, 'The agent should not reset its password.' );
+		$this->assertSame( 'no_password_reset', $reset->get_error_code() );
+
+		// Without a parent, the agent is suspended, so its credential stops working.
+		$fresh_request();
+		add_filter( 'application_password_is_api_request', '__return_true' );
+		$rejected = wp_authenticate_application_password( null, $login, $credential );
+		remove_filter( 'application_password_is_api_request', '__return_true' );
+		$this->assertWPError( $rejected, 'The agent\'s Application Password should get the safeguards.' );
+		$this->assertSame( 'wpai_agent_suspended', $rejected->get_error_code() );
+
+		$fresh_request();
+		wp_set_current_user( $user_id );
+		$this->assertFalse( current_user_can( 'read' ), 'An existing session should get the safeguards.' );
+
+		// Code running before the plugin loads, such as a must-use plugin, may resolve the user first.
+		update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '0' );
+		$this->remove_agent_account_safeguards();
+		remove_action( 'set_current_user', array( Main::get_instance(), 'register_safeguards_for_current_agent' ), 0 );
+		wp_set_current_user( $this->admin_id );
+		wp_set_current_user( $user_id );
+		$this->assertFalse( $this->agent_account_safeguards_registered() );
+		Main::get_instance()->register_agent_account_safeguards();
+		$this->assertFalse( current_user_can( 'read' ), 'A user resolved before the plugin loaded should get the safeguards.' );
+		wp_set_current_user( $this->admin_id );
+	}
+
+	/**
 	 * Tests that a missing or outdated flag is recomputed rather than leaving agents unprotected.
 	 *
 	 * @since x.x.x
@@ -3259,31 +3327,23 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Removes only Agent Account callbacks from their always-on hooks.
+	 * Removes every agent safeguard callback, as on a request that has not registered them.
 	 *
 	 * @since x.x.x
 	 */
 	private function remove_agent_account_safeguards(): void {
 		global $wp_filter;
 
-		$hooks = array(
-			'wp_authenticate_user',
-			'allow_password_reset',
-			'wp_is_application_passwords_available_for_user',
-			'map_meta_cap',
-			'user_has_cap',
-			'pre_update_site_option_site_admins',
-		);
-
-		foreach ( $hooks as $hook_name ) {
-			if ( ! isset( $wp_filter[ $hook_name ] ) || ! $wp_filter[ $hook_name ] instanceof \WP_Hook ) {
+		foreach ( $wp_filter as $hook_name => $hook ) {
+			if ( ! $hook instanceof \WP_Hook ) {
 				continue;
 			}
 
-			foreach ( $wp_filter[ $hook_name ]->callbacks as $priority => $callbacks ) {
+			foreach ( $hook->callbacks as $priority => $callbacks ) {
 				foreach ( $callbacks as $callback ) {
 					$function = $callback['function'] ?? null;
-					if ( ! is_array( $function ) || ! isset( $function[0] ) || ! $function[0] instanceof Agent_Account ) {
+					$object   = is_array( $function ) ? ( $function[0] ?? null ) : null;
+					if ( ! $object instanceof Agent_Account && ! $object instanceof Agent_Credentials ) {
 						continue;
 					}
 
