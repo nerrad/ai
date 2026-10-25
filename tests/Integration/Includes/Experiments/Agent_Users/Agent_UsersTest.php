@@ -1833,6 +1833,16 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertSame( 400, $response->get_status() );
 		$this->assertSame( 'wpai_agent_password_not_allowed', $response->as_error()->get_error_code() );
 
+		// An agent's own credential reaches its profile as `/users/me`.
+		wp_set_current_user( $agent->ID );
+		$request = new WP_REST_Request( 'POST', '/wp/v2/users/me' );
+		$request->set_param( 'password', 'known-password-4' );
+		$response = rest_do_request( $request );
+		wp_set_current_user( $this->admin_id );
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'wpai_agent_password_not_allowed', $response->as_error()->get_error_code() );
+		$this->assertSame( $original, get_userdata( $agent->ID )->user_pass );
+
 		$human_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		wp_set_password( 'human-password-1', $human_id );
 		$this->assertTrue( wp_check_password( 'human-password-1', get_userdata( $human_id )->user_pass, $human_id ), 'Humans are unaffected.' );
