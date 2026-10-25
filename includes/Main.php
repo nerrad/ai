@@ -57,6 +57,15 @@ final class Main {
 	private ?Agent_Account $agent_account = null;
 
 	/**
+	 * Agent account lifecycle rules, once registered.
+	 *
+	 * @since x.x.x
+	 *
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account|null
+	 */
+	private ?Agent_Account $agent_lifecycle = null;
+
+	/**
 	 * Gets the (singleton) instance of the Main class.
 	 *
 	 * @since 0.8.0
@@ -140,7 +149,9 @@ final class Main {
 	 * well. The safeguards only register once an agent may exist, and marking
 	 * the first agent registers them right away, so they are in force for the
 	 * rest of that request too. Until then, any agent that authenticates or
-	 * asks for a password reset registers them before it can act.
+	 * asks for a password reset registers them before it can act. The rules
+	 * for removing and deleting accounts always run, since they only run when
+	 * an account is removed or deleted.
 	 *
 	 * @since x.x.x
 	 *
@@ -148,6 +159,7 @@ final class Main {
 	 */
 	public function register_agent_account_safeguards(): void {
 		Agent_Account::register_always_on_rules();
+		$this->register_agent_lifecycle_once();
 		add_action( 'added_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
 		add_action( 'updated_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
 
@@ -271,6 +283,20 @@ final class Main {
 		}
 
 		$this->register_safeguards_if_agent( (int) $user_id );
+	}
+
+	/**
+	 * Registers the agent account lifecycle rules unless they are already in place.
+	 *
+	 * @since x.x.x
+	 */
+	private function register_agent_lifecycle_once(): void {
+		if ( null !== $this->agent_lifecycle && false !== has_action( 'delete_user', array( $this->agent_lifecycle, 'delete_agents_of_deleted_user' ) ) ) {
+			return;
+		}
+
+		$this->agent_lifecycle = new Agent_Account();
+		$this->agent_lifecycle->register_account_lifecycle();
 	}
 
 	/**

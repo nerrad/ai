@@ -184,7 +184,20 @@ final class Agent_Account {
 		add_action( 'wp_authenticate_application_password_errors', array( $this, 'reject_suspended_agent_credentials' ), 10, 2 );
 		add_filter( 'auth_user_meta_' . self::META_KEY, '__return_false' );
 		add_filter( 'auth_user_meta_' . self::META_PARENT, '__return_false' );
+	}
 
+	/**
+	 * Hooks the rules for removing, deleting, and promoting accounts into WordPress.
+	 *
+	 * Unlike the rules in `register()`, these run whether or not an agent is
+	 * known, so an agent created behind the plugin's back is still deleted or
+	 * removed with its parent. They only run when an account is removed,
+	 * deleted, or made a super admin, and look up the agents involved
+	 * themselves, so they cost nothing on other requests.
+	 *
+	 * @since x.x.x
+	 */
+	public function register_account_lifecycle(): void {
 		add_action( 'delete_user', array( $this, 'delete_agents_of_deleted_user' ), 10, 2 );
 		add_filter( 'users_have_additional_content', array( $this, 'count_agent_content' ), 10, 2 );
 		add_action( 'delete_user_form', array( $this, 'render_agents_deleted_with_parent' ), 10, 2 );

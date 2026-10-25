@@ -2140,6 +2140,48 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that an agent marked behind the plugin's back is still deleted with its parent.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_agents_marked_behind_the_plugins_back_are_deleted_with_their_parent() {
+		global $wpdb;
+
+		// A request on an install that knows no agent.
+		update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '0' );
+		$this->remove_agent_account_safeguards();
+		Main::get_instance()->register_agent_account_safeguards();
+		$this->assertFalse( $this->agent_account_safeguards_registered() );
+
+		// As with `wp user meta add --skip-plugins`, which runs no plugin hooks.
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent_id  = self::factory()->user->create( array( 'role' => 'author' ) );
+		foreach ( array(
+			Agent_Account::META_KEY    => '1',
+			Agent_Account::META_PARENT => (string) $parent_id,
+		) as $key => $value ) {
+			$wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+				$wpdb->usermeta,
+				array(
+					'user_id'    => $agent_id,
+					'meta_key'   => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+					'meta_value' => $value, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				)
+			);
+		}
+		wp_cache_delete( $agent_id, 'user_meta' );
+		wp_cache_set_users_last_changed();
+
+		if ( is_multisite() ) {
+			wpmu_delete_user( $parent_id );
+		} else {
+			wp_delete_user( $parent_id );
+		}
+
+		$this->assertFalse( get_user_by( 'id', $agent_id ), 'The agent should go with its parent even before the safeguards know about it.' );
+	}
+
+	/**
 	 * Tests that an agent marked behind the plugin's back gets the safeguards whichever way it authenticates.
 	 *
 	 * @since x.x.x
