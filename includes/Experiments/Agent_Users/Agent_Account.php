@@ -297,7 +297,7 @@ final class Agent_Account {
 			return 'role_not_allowed';
 		}
 
-		if ( is_multisite() && ! is_user_member_of_blog( $parent->ID ) && ! is_super_admin( $parent->ID ) ) {
+		if ( is_multisite() && ! self::belongs_to_site( $parent->ID, get_current_blog_id() ) && ! is_super_admin( $parent->ID ) ) {
 			return 'parent_not_member';
 		}
 
@@ -629,7 +629,7 @@ final class Agent_Account {
 		if (
 			! $parent instanceof WP_User ||
 			self::is_agent( $parent ) ||
-			( ! is_user_member_of_blog( $parent->ID ) && ! is_super_admin( $parent->ID ) ) ||
+			( ! self::belongs_to_site( $parent->ID, get_current_blog_id() ) && ! is_super_admin( $parent->ID ) ) ||
 			// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- The agent parent capability constant.
 			! user_can( $parent, self::PARENT_CAP )
 		) {
@@ -1401,11 +1401,27 @@ final class Agent_Account {
 		}
 
 		$parent = self::get_parent( (int) $user_id );
-		if ( null !== $parent && ( is_super_admin( $parent->ID ) || is_user_member_of_blog( $parent->ID, (int) $blog_id ) ) ) {
+		if ( null !== $parent && ( is_super_admin( $parent->ID ) || self::belongs_to_site( $parent->ID, (int) $blog_id ) ) ) {
 			return $can_add;
 		}
 
 		return new WP_Error( 'wpai_agent_parent_not_member', __( 'An agent can only be added to sites its parent user belongs to.', 'ai' ) );
+	}
+
+	/**
+	 * Checks whether a user belongs to a site, including an archived, spam, or deleted one.
+	 *
+	 * `is_user_member_of_blog()` answers false for those sites, although the
+	 * user keeps a role there and core's network delete screen lists them.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param int $user_id User ID.
+	 * @param int $site_id Site ID.
+	 * @return bool True when the user has a role on the site.
+	 */
+	private static function belongs_to_site( int $user_id, int $site_id ): bool {
+		return array_key_exists( $site_id, get_blogs_of_user( $user_id, true ) );
 	}
 
 	/**
@@ -1428,7 +1444,7 @@ final class Agent_Account {
 		self::reject_agent_as_heir( $user_id, $reassign );
 
 		foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
-			if ( ! is_user_member_of_blog( $agent_id, $blog_id ) ) {
+			if ( ! self::belongs_to_site( $agent_id, $blog_id ) ) {
 				continue;
 			}
 
@@ -1464,7 +1480,7 @@ final class Agent_Account {
 			foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
 				$agent = get_userdata( $agent_id );
 				// Core already lists agents removed in their own right.
-				if ( ! $agent instanceof WP_User || in_array( $agent_id, $user_ids, true ) || ! is_user_member_of_blog( $agent_id ) ) {
+				if ( ! $agent instanceof WP_User || in_array( $agent_id, $user_ids, true ) || ! self::belongs_to_site( $agent_id, get_current_blog_id() ) ) {
 					continue;
 				}
 
@@ -1538,6 +1554,11 @@ final class Agent_Account {
 		$choices = wp_unslash( $_POST['delete'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Only compared against a fixed value below.
 		foreach ( $choices as $site_id => $site_choices ) {
 			$site_id = (int) $site_id;
+			/*
+			 * Unlike `belongs_to_site()`, this skips only the active sites the
+			 * agent still belongs to: `wpmu_delete_user()` deletes the content
+			 * there, but skips archived, spam, and deleted sites.
+			 */
 			if (
 				! is_array( $site_choices ) ||
 				'delete' !== ( $site_choices[ $agent_id ] ?? $site_choices[ $parent_id ] ?? '' ) ||
@@ -1807,7 +1828,7 @@ final class Agent_Account {
 			// Like core's own list, archived and spam sites are included. `wpmu_delete_user()` skips them, so without a choice the content there would be orphaned.
 			foreach ( array_keys( get_blogs_of_user( $agent_id, true ) ) as $site_id ) {
 				$site_id = (int) $site_id;
-				if ( is_user_member_of_blog( $entry['parent_id'], $site_id ) ) {
+				if ( self::belongs_to_site( $entry['parent_id'], $site_id ) ) {
 					continue;
 				}
 

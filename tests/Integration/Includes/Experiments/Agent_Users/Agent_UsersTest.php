@@ -1436,6 +1436,59 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that archived sites still count as the parent's and agent's sites.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_archived_sites_still_belong_to_parent_and_agent() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$receiver_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent       = $this->account->provision( 'archivist_agent', 'author', 'archivist_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+
+		$site_id = (int) self::factory()->blog->create();
+		add_user_to_blog( $site_id, $parent_id, 'editor' );
+		add_user_to_blog( $site_id, $receiver_id, 'editor' );
+		update_blog_status( $site_id, 'archived', '1' );
+
+		$this->assertTrue( add_user_to_blog( $site_id, $agent->ID, 'author' ), 'The parent still belongs to an archived site.' );
+		switch_to_blog( $site_id ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Creating content on another site of the test network.
+		$post_id = $this->create_post( $agent->ID, 'publish' );
+		// The parent still belongs there, so a suspension blames their eligibility, not their membership.
+		$parent = get_userdata( $parent_id );
+		$parent->add_cap( Agent_Account::PARENT_CAP, false );
+		$reason = Agent_Account::get_suspension_reason( $agent->ID );
+		$parent->remove_cap( Agent_Account::PARENT_CAP );
+		restore_current_blog();
+		$this->assertSame( 'parent_not_eligible', $reason );
+
+		// The removal confirmation on that site names the agent going with the parent.
+		switch_to_blog( $site_id ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Rendering the archived site's Users screen.
+		$GLOBALS['pagenow'] = 'users.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
+		$_REQUEST['action'] = 'remove';
+		$_REQUEST['user']   = (string) $parent_id;
+		ob_start();
+		$this->account->render_agents_removed_with_parent();
+		$warning = (string) ob_get_clean();
+		restore_current_blog();
+		$this->assertStringContainsString( 'archivist_agent', $warning );
+
+		// Core's network delete handler reassigns the parent's content on each of their sites.
+		remove_user_from_blog( $parent_id, $site_id, $receiver_id );
+
+		switch_to_blog( $site_id ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Reading content on another site of the test network.
+		$author = (int) get_post_field( 'post_author', $post_id );
+		restore_current_blog();
+		$this->assertSame( $receiver_id, $author, 'Agent content on an archived site follows the parent\'s reassignment.' );
+	}
+
+	/**
 	 * Tests that agent content follows the parent's "Delete all content" choice on the parent's sites.
 	 *
 	 * @since x.x.x
