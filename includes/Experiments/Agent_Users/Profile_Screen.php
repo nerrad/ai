@@ -203,7 +203,9 @@ final class Profile_Screen {
 	 * Renders the account type note for an agent's profile.
 	 *
 	 * It is descriptive text rather than a notice. Core has no hook below the
-	 * title, so the footer script moves it from the notices position.
+	 * title, so the footer script moves it from the notices position. It is
+	 * not hidden until then, so the explanation, including why an agent is
+	 * suspended, stays available without JavaScript.
 	 *
 	 * @since x.x.x
 	 */
@@ -216,7 +218,7 @@ final class Profile_Screen {
 		$parent = Agent_Account::get_parent( $agent );
 		$reason = Agent_Account::get_suspension_reason( $agent );
 
-		echo '<p class="wpai-agent-account-type" hidden>';
+		echo '<p class="wpai-agent-account-type">';
 		echo '<strong>' . esc_html__( 'Agent account.', 'ai' ) . '</strong> ';
 		echo esc_html__( 'This account is used by software, such as an AI agent or a scheduled job, not by a person. It cannot log in with a password; use Application Passwords for API access.', 'ai' ) . ' ';
 		if ( null === $parent ) {
@@ -306,7 +308,6 @@ final class Profile_Screen {
 	}
 	if ( note && marker ) {
 		marker.after( note );
-		note.hidden = false;
 	}
 	if ( submit && 'submit' === submit.type ) {
 		submit.value = data.submit;

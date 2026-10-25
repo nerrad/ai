@@ -2687,7 +2687,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		ob_start();
 		$screen->render_account_type();
 		$output = (string) ob_get_clean();
-		$this->assertStringContainsString( '<p class="wpai-agent-account-type"', $output );
+		$this->assertStringContainsString( '<p class="wpai-agent-account-type">', $output, 'The note should be visible without JavaScript.' );
 		$this->assertStringContainsString( 'Agent account.', $output );
 		$this->assertStringContainsString( 'It acts on behalf of <strong>' . $human->display_name . '</strong> and can only do', $output );
 		$this->assertStringNotContainsString( 'notice', $output, 'The note is plain text, not a notice.' );
