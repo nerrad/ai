@@ -1206,25 +1206,29 @@ final class Agent_Account {
 		$user_id = (int) $user_id;
 
 		foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
-			self::delete_agent_content_chosen_for_deletion( $agent_id );
+			self::delete_agent_content_chosen_for_deletion( $agent_id, $user_id );
 			wpmu_delete_user( $agent_id );
 		}
 	}
 
 	/**
-	 * Deletes agent content on the other sites where deletion was chosen.
+	 * Deletes agent content on the sites where deletion was chosen.
 	 *
-	 * Core's network delete handler removes the agent from each site offered
-	 * by `render_agent_content_on_other_sites()` before deleting the account.
+	 * Core's network delete handler removes each user from the sites on the
+	 * delete screen before deleting the account. On the parent's sites the
+	 * agent is removed with the parent, and on its other sites the agent is
+	 * removed through the choice `render_agent_content_on_other_sites()` adds.
 	 * Removal without a reassignment leaves the content behind with a deleted
-	 * author, so the content of sites marked "Delete all content" is deleted
-	 * here the way `wpmu_delete_user()` deletes it on the agent's other sites.
+	 * author, so wherever "Delete all content" was chosen, for the agent or for
+	 * its parent, the content is deleted here the way `wpmu_delete_user()`
+	 * deletes it on the agent's remaining sites.
 	 *
 	 * @since x.x.x
 	 *
-	 * @param int $agent_id Agent user ID.
+	 * @param int $agent_id  Agent user ID.
+	 * @param int $parent_id The agent's parent, whose choice the agent's content follows.
 	 */
-	private static function delete_agent_content_chosen_for_deletion( int $agent_id ): void {
+	private static function delete_agent_content_chosen_for_deletion( int $agent_id, int $parent_id ): void {
 		global $wpdb;
 
 		if (
@@ -1240,7 +1244,7 @@ final class Agent_Account {
 			$site_id = (int) $site_id;
 			if (
 				! is_array( $site_choices ) ||
-				'delete' !== ( $site_choices[ $agent_id ] ?? '' ) ||
+				'delete' !== ( $site_choices[ $agent_id ] ?? $site_choices[ $parent_id ] ?? '' ) ||
 				is_user_member_of_blog( $agent_id, $site_id )
 			) {
 				continue;

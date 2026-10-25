@@ -1191,6 +1191,36 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that agent content follows the parent's "Delete all content" choice on the parent's sites.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_parent_delete_choice_deletes_agent_content_on_parent_sites() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$site_id   = get_current_blog_id();
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'tidy_agent', 'author', 'tidy_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+		$agent_post = $this->create_post( $agent->ID, 'publish' );
+
+		// Core's handler removes the parent from each site without a reassignment, then deletes the account.
+		$_POST = array(
+			'_wpnonce' => wp_create_nonce( 'ms-users-delete' ),
+			'delete'   => array( $site_id => array( $parent_id => 'delete' ) ),
+		);
+		remove_user_from_blog( $parent_id, $site_id );
+		wpmu_delete_user( $parent_id );
+
+		$this->assertFalse( get_user_by( 'id', $agent->ID ), 'The agent is deleted with its parent.' );
+		$this->assertSame( 'trash', get_post_status( $agent_post ), 'Agent content should be deleted where the parent\'s content is.' );
+	}
+
+	/**
 	 * Test that provisioning validates its input.
 	 *
 	 * @since x.x.x
