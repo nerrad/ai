@@ -332,7 +332,7 @@ final class Profile_Screen {
 				'addAgentUrl' => New_User_Screen::url(),
 				// Provisioning starts from a site so the initial role has site
 				// context; the network profile uses core's own header action.
-				'canAdd'      => ! is_network_admin() && Agent_Account::current_user_can_provision(),
+				'canAdd'      => ! is_network_admin() && Agent_Provisioner::current_user_can_provision(),
 			)
 		);
 

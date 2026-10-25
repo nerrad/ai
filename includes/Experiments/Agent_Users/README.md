@@ -86,7 +86,7 @@ Stored metadata:
 
 `Agent_Account::PARENT_CAP` (`wpai_add_agents`) is the parent eligibility capability, `Agent_Account::is_suspended()` reports whether an agent currently has an eligible parent on the current site, and `Agent_Account::get_suspension_reason()` explains why it does not.
 
-`Agent_Account::LOGIN_SUFFIX` holds the username suffix, and `Agent_Account::apply_login_suffix()` appends it to a sanitized login when missing.
+`Agent_Provisioner::LOGIN_SUFFIX` holds the username suffix, and `Agent_Provisioner::apply_login_suffix()` appends it to a sanitized login when missing.
 
 Application Passwords require HTTPS or a `local` environment type. The experiment does not override that global core requirement.
 

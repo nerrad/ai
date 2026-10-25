@@ -20,7 +20,10 @@ use WordPress\AI\Admin\Upgrades;
 use WordPress\AI\CLI\Embeddings_Command;
 use WordPress\AI\Connectors\Featured_Connectors;
 use WordPress\AI\Experiments\Agent_Users\Agent_Account;
+use WordPress\AI\Experiments\Agent_Users\Agent_Authentication;
+use WordPress\AI\Experiments\Agent_Users\Agent_Capabilities;
 use WordPress\AI\Experiments\Agent_Users\Agent_Credentials;
+use WordPress\AI\Experiments\Agent_Users\Agent_Lifecycle;
 use WordPress\AI\Experiments\Experiments;
 use WordPress\AI\Features\Loader;
 use WordPress\AI\Features\Registry;
@@ -48,22 +51,22 @@ final class Main {
 	private static $instance;
 
 	/**
-	 * Agent account safeguards, once registered.
+	 * Agent capability rules, once registered with the other agent safeguards.
 	 *
 	 * @since x.x.x
 	 *
-	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account|null
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Capabilities|null
 	 */
-	private ?Agent_Account $agent_account = null;
+	private ?Agent_Capabilities $agent_capabilities = null;
 
 	/**
 	 * Agent account lifecycle rules, once registered.
 	 *
 	 * @since x.x.x
 	 *
-	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account|null
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Lifecycle|null
 	 */
-	private ?Agent_Account $agent_lifecycle = null;
+	private ?Agent_Lifecycle $agent_lifecycle = null;
 
 	/**
 	 * Gets the (singleton) instance of the Main class.
@@ -158,7 +161,7 @@ final class Main {
 	 * @internal Public for integration testing.
 	 */
 	public function register_agent_account_safeguards(): void {
-		Agent_Account::register_always_on_rules();
+		Agent_Capabilities::register_parent_capability();
 		$this->register_agent_lifecycle_once();
 		add_action( 'added_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
 		add_action( 'updated_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
@@ -295,8 +298,8 @@ final class Main {
 			return;
 		}
 
-		$this->agent_lifecycle = new Agent_Account();
-		$this->agent_lifecycle->register_account_lifecycle();
+		$this->agent_lifecycle = new Agent_Lifecycle();
+		$this->agent_lifecycle->register();
 	}
 
 	/**
@@ -305,12 +308,13 @@ final class Main {
 	 * @since x.x.x
 	 */
 	private function register_agent_safeguards_once(): void {
-		if ( null !== $this->agent_account && false !== has_filter( 'map_meta_cap', array( $this->agent_account, 'limit_agents_to_parent' ) ) ) {
+		if ( null !== $this->agent_capabilities && false !== has_filter( 'map_meta_cap', array( $this->agent_capabilities, 'limit_agents_to_parent' ) ) ) {
 			return;
 		}
 
-		$this->agent_account = new Agent_Account();
-		$this->agent_account->register();
+		( new Agent_Authentication() )->register();
+		$this->agent_capabilities = new Agent_Capabilities();
+		$this->agent_capabilities->register();
 		( new Agent_Credentials() )->register();
 	}
 

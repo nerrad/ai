@@ -65,7 +65,7 @@ class Agent_Users extends Abstract_Feature {
 			return;
 		}
 
-		( new New_User_Screen( new Agent_Account() ) )->register();
+		( new New_User_Screen( new Agent_Provisioner() ) )->register();
 	}
 
 	/**

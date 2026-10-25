@@ -55,23 +55,23 @@ final class New_User_Screen {
 	private const MENU_SLUG = 'user-new.php?' . self::AGENT_FIELD . '=1';
 
 	/**
-	 * Agent account service.
+	 * Agent provisioning service.
 	 *
 	 * @since x.x.x
 	 *
-	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Provisioner
 	 */
-	private Agent_Account $account;
+	private Agent_Provisioner $provisioner;
 
 	/**
 	 * Constructor.
 	 *
 	 * @since x.x.x
 	 *
-	 * @param \WordPress\AI\Experiments\Agent_Users\Agent_Account $account Agent account service.
+	 * @param \WordPress\AI\Experiments\Agent_Users\Agent_Provisioner $provisioner Agent provisioning service.
 	 */
-	public function __construct( Agent_Account $account ) {
-		$this->account = $account;
+	public function __construct( Agent_Provisioner $provisioner ) {
+		$this->provisioner = $provisioner;
 	}
 
 	/**
@@ -96,7 +96,7 @@ final class New_User_Screen {
 	 * @since x.x.x
 	 */
 	public function add_submenu(): void {
-		if ( ! Agent_Account::current_user_can_provision() ) {
+		if ( ! Agent_Provisioner::current_user_can_provision() ) {
 			return;
 		}
 
@@ -192,7 +192,7 @@ final class New_User_Screen {
 	 * @param string $context Form context, `add-new-user` or `add-existing-user`.
 	 */
 	public function render_fields( string $context ): void {
-		if ( 'add-new-user' !== $context || ! Agent_Account::current_user_can_provision() ) {
+		if ( 'add-new-user' !== $context || ! Agent_Provisioner::current_user_can_provision() ) {
 			return;
 		}
 
@@ -214,7 +214,7 @@ final class New_User_Screen {
 			sprintf(
 				/* translators: %s: Username suffix, for example "_agent". */
 				__( 'Agent usernames end with %s. The suffix is added for you.', 'ai' ),
-				Agent_Account::LOGIN_SUFFIX
+				Agent_Provisioner::LOGIN_SUFFIX
 			)
 		) . '</p>';
 
@@ -320,7 +320,7 @@ final class New_User_Screen {
 	 * @since x.x.x
 	 */
 	public function print_script(): void {
-		if ( ! Agent_Account::current_user_can_provision() ) {
+		if ( ! Agent_Provisioner::current_user_can_provision() ) {
 			return;
 		}
 
@@ -396,7 +396,7 @@ JS;
 	public function print_users_screen_script(): void {
 		// The network Users screen has a different account-creation flow. Agents
 		// are provisioned from a site so their initial role has site context.
-		if ( is_network_admin() || ! Agent_Account::current_user_can_provision() ) {
+		if ( is_network_admin() || ! Agent_Provisioner::current_user_can_provision() ) {
 			return;
 		}
 
@@ -441,7 +441,7 @@ JS;
 
 		check_admin_referer( 'create-user', '_wpnonce_create-user' );
 
-		if ( ! Agent_Account::current_user_can_provision() ) {
+		if ( ! Agent_Provisioner::current_user_can_provision() ) {
 			wp_die(
 				esc_html__( 'Sorry, you are not allowed to create agent accounts.', 'ai' ),
 				'',
@@ -461,7 +461,7 @@ JS;
 		// The form requires an explicit parent; programmatic callers default to themselves.
 		$result = 0 === $parent_id
 			? new WP_Error( 'wpai_agent_parent_required', __( 'Please select the parent user this agent acts for.', 'ai' ) )
-			: $this->account->provision( $login, $role, $email, $first_name, $last_name, $url, $parent_id );
+			: $this->provisioner->provision( $login, $role, $email, $first_name, $last_name, $url, $parent_id );
 
 		if ( is_wp_error( $result ) ) {
 			if ( is_multisite() ) {
@@ -542,6 +542,6 @@ JS;
 		}
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Reading a query param to pick the screen variant only, no data processing.
-		return 'user-new.php' === $pagenow && ! empty( $_REQUEST[ self::AGENT_FIELD ] ) && Agent_Account::current_user_can_provision();
+		return 'user-new.php' === $pagenow && ! empty( $_REQUEST[ self::AGENT_FIELD ] ) && Agent_Provisioner::current_user_can_provision();
 	}
 }

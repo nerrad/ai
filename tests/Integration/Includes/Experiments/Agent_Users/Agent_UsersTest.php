@@ -12,7 +12,11 @@ use WP_UnitTestCase;
 use WordPress\AI\Admin\Activation;
 use WordPress\AI\Admin\Deactivation;
 use WordPress\AI\Experiments\Agent_Users\Agent_Account;
+use WordPress\AI\Experiments\Agent_Users\Agent_Authentication;
+use WordPress\AI\Experiments\Agent_Users\Agent_Capabilities;
 use WordPress\AI\Experiments\Agent_Users\Agent_Credentials;
+use WordPress\AI\Experiments\Agent_Users\Agent_Lifecycle;
+use WordPress\AI\Experiments\Agent_Users\Agent_Provisioner;
 use WordPress\AI\Experiments\Agent_Users\Agent_Users;
 use WordPress\AI\Experiments\Agent_Users\New_User_Screen;
 use WordPress\AI\Experiments\Agent_Users\Profile_Screen;
@@ -38,13 +42,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	private Agent_Users $experiment;
 
 	/**
-	 * Agent account service.
+	 * Agent provisioning service.
 	 *
 	 * @since x.x.x
 	 *
-	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Provisioner
 	 */
-	private Agent_Account $account;
+	private Agent_Provisioner $provisioner;
 
 	/**
 	 * Administrator performing the provisioning in tests.
@@ -94,8 +98,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			'Agent Users experiment should be registered in the registry.'
 		);
 
-		$this->experiment = $experiment;
-		$this->account    = new Agent_Account();
+		$this->experiment  = $experiment;
+		$this->provisioner = new Agent_Provisioner();
 
 		$this->admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		if ( is_multisite() ) {
@@ -192,7 +196,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @return \WP_User Provisioned agent.
 	 */
 	private function provision_agent( string $login = 'test_agent', string $role = 'editor' ): \WP_User {
-		$result = $this->account->provision( $login, $role, $login . '@example.com' );
+		$result = $this->provisioner->provision( $login, $role, $login . '@example.com' );
 		$this->assertInstanceOf( \WP_User::class, $result, 'Provisioning should succeed.' );
 
 		return $result;
@@ -218,7 +222,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_network_safeguards_are_available() {
 		$this->assertTrue( Agent_Account::can_enforce_network_safeguards() );
-		$this->assertTrue( Agent_Account::current_user_can_provision() );
+		$this->assertTrue( Agent_Provisioner::current_user_can_provision() );
 	}
 
 	/**
@@ -234,7 +238,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'site_only_agent', 'author', 'site_only_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'site_only_agent', 'author', 'site_only_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$this->assertTrue( user_can( $parent_id, 'create_app_password', $agent->ID ), 'The parent creates credentials while the plugin is network-active.' );
 
@@ -262,17 +266,17 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->set_ai_plugin_network_active( false );
 
 		$this->assertFalse( Agent_Account::can_enforce_network_safeguards() );
-		$this->assertFalse( Agent_Account::current_user_can_provision() );
+		$this->assertFalse( Agent_Provisioner::current_user_can_provision() );
 
-		$result = $this->account->provision( 'unsafe-agent', 'editor', 'unsafe-agent@example.com' );
+		$result = $this->provisioner->provision( 'unsafe-agent', 'editor', 'unsafe-agent@example.com' );
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_requires_network_activation', $result->get_error_code() );
-		$this->assertFalse( username_exists( Agent_Account::apply_login_suffix( 'unsafe-agent' ) ), 'A direct provisioning call must not bypass the network-activation requirement.' );
+		$this->assertFalse( username_exists( Agent_Provisioner::apply_login_suffix( 'unsafe-agent' ) ), 'A direct provisioning call must not bypass the network-activation requirement.' );
 
 		$GLOBALS['pagenow']     = 'user-new.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
 		$_REQUEST['wpai_agent'] = '1';
 		ob_start();
-		( new New_User_Screen( $this->account ) )->render_fields( 'add-new-user' );
+		( new New_User_Screen( $this->provisioner ) )->render_fields( 'add-new-user' );
 		$this->assertSame( '', ob_get_clean(), 'The Add Agent fields should stay unavailable.' );
 
 		ob_start();
@@ -286,7 +290,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertSame( '', ob_get_clean(), 'Screens unrelated to users should not carry the notice.' );
 
 		$this->set_ai_plugin_network_active( true );
-		$this->assertTrue( Agent_Account::current_user_can_provision(), 'Provisioning should resume after network activation.' );
+		$this->assertTrue( Agent_Provisioner::current_user_can_provision(), 'Provisioning should resume after network activation.' );
 	}
 
 	/**
@@ -356,7 +360,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_provision_accepts_explicit_parent() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 
-		$agent = $this->account->provision( 'editor_helper', 'author', 'editor_helper@example.com', '', '', '', $parent_id );
+		$agent = $this->provisioner->provision( 'editor_helper', 'author', 'editor_helper@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$parent = wpai_get_agent_parent( $agent );
@@ -406,7 +410,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				$parent_id = self::factory()->user->create( array( 'role' => $kind ) );
 		}
 
-		$result = $this->account->provision( 'invalid_parent', $role, 'invalid_parent@example.com', '', '', '', $parent_id );
+		$result = $this->provisioner->provision( 'invalid_parent', $role, 'invalid_parent@example.com', '', '', '', $parent_id );
 
 		$this->assertWPError( $result );
 		$this->assertSame( $code, $result->get_error_code() );
@@ -454,11 +458,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 
 		wp_set_current_user( $agent->ID );
-		$result = $this->account->provision( 'grandchild', 'author', 'grandchild@example.com', '', '', '', $editor_id );
+		$result = $this->provisioner->provision( 'grandchild', 'author', 'grandchild@example.com', '', '', '', $editor_id );
 
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_cannot_provision_agents', $result->get_error_code() );
-		$this->assertFalse( Agent_Account::current_user_can_provision() );
+		$this->assertFalse( Agent_Provisioner::current_user_can_provision() );
 
 		foreach ( array( Agent_Account::META_KEY, Agent_Account::META_PARENT ) as $meta_key ) {
 			$this->assertFalse(
@@ -475,8 +479,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_agent_and_parent_share_post_ownership() {
 		$parent_id   = self::factory()->user->create( array( 'role' => 'author' ) );
-		$agent       = $this->account->provision( 'owning_agent', 'author', 'owning_agent@example.com', '', '', '', $parent_id );
-		$sibling     = $this->account->provision( 'sibling_agent', 'author', 'sibling_agent@example.com', '', '', '', $parent_id );
+		$agent       = $this->provisioner->provision( 'owning_agent', 'author', 'owning_agent@example.com', '', '', '', $parent_id );
+		$sibling     = $this->provisioner->provision( 'sibling_agent', 'author', 'sibling_agent@example.com', '', '', '', $parent_id );
 		$stranger_id = self::factory()->user->create( array( 'role' => 'author' ) );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$this->assertInstanceOf( \WP_User::class, $sibling );
@@ -509,7 +513,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_shared_ownership_keeps_own_post_limits() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'contributor' ) );
-		$agent     = $this->account->provision( 'contributing_agent', 'contributor', 'contributing_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'contributing_agent', 'contributor', 'contributing_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$pending   = $this->create_post( $agent->ID, 'pending' );
@@ -551,8 +555,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		foreach ( $pairs as $index => [ $parent_role, $agent_role ] ) {
 			$parent_id = self::factory()->user->create( array( 'role' => $parent_role ) );
-			$agent     = $this->account->provision( "matrix_{$index}", $agent_role, "matrix_{$index}@example.com", '', '', '', $parent_id );
-			$sibling   = $this->account->provision( "matrix_sibling_{$index}", $agent_role, "matrix_sibling_{$index}@example.com", '', '', '', $parent_id );
+			$agent     = $this->provisioner->provision( "matrix_{$index}", $agent_role, "matrix_{$index}@example.com", '', '', '', $parent_id );
+			$sibling   = $this->provisioner->provision( "matrix_sibling_{$index}", $agent_role, "matrix_sibling_{$index}@example.com", '', '', '', $parent_id );
 			$this->assertInstanceOf( \WP_User::class, $agent );
 			$this->assertInstanceOf( \WP_User::class, $sibling );
 
@@ -642,7 +646,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_shared_ownership_covers_private_posts() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'author' ) );
-		$agent     = $this->account->provision( 'private_agent', 'author', 'private_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'private_agent', 'author', 'private_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$agent_private  = $this->create_post( $agent->ID, 'private' );
@@ -675,13 +679,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		try {
 			// The parent cannot administer users, but the agent never could either, so the role fits.
 			$editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-			$bounded   = $this->account->provision( 'helpdesk_agent', 'helpdesk', 'helpdesk_agent@example.com', '', '', '', $editor_id );
+			$bounded   = $this->provisioner->provision( 'helpdesk_agent', 'helpdesk', 'helpdesk_agent@example.com', '', '', '', $editor_id );
 
 			if ( is_multisite() ) {
 				// A super admin parent holds every capability, so only the agent rule stands in the way.
 				$super_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 				grant_super_admin( $super_id );
-				$network_agent = $this->account->provision( 'network_helpdesk_agent', 'helpdesk', 'network_helpdesk_agent@example.com', '', '', '', $super_id );
+				$network_agent = $this->provisioner->provision( 'network_helpdesk_agent', 'helpdesk', 'network_helpdesk_agent@example.com', '', '', '', $super_id );
 				$this->assertInstanceOf( \WP_User::class, $network_agent );
 				$this->assertFalse( user_can( $network_agent, 'manage_sites' ), 'An agent cannot add users to sites from the network screens.' );
 				$this->assertFalse( user_can( $network_agent, 'manage_network_users' ), 'An agent cannot mark users as spam from the network screens.' );
@@ -706,7 +710,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_parent_and_agent_user_management() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$other_id  = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'managed_agent', 'author', 'managed_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'managed_agent', 'author', 'managed_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$this->assertTrue( user_can( $parent_id, 'edit_user', $agent->ID ), 'A parent should edit their agent.' );
@@ -716,7 +720,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertFalse( user_can( $other_id, 'edit_user', $agent->ID ), 'Other users should not edit the agent.' );
 
 		// Having agents changes nothing about managing anyone else.
-		$other_agent = $this->account->provision( 'other_managed_agent', 'author', 'other_managed_agent@example.com', '', '', '', $other_id );
+		$other_agent = $this->provisioner->provision( 'other_managed_agent', 'author', 'other_managed_agent@example.com', '', '', '', $other_id );
 		$this->assertInstanceOf( \WP_User::class, $other_agent );
 		foreach ( array( $other_id, $other_agent->ID, $this->admin_id ) as $target_id ) {
 			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user', 'create_app_password' ) as $capability ) {
@@ -780,7 +784,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$wp_rest_server = null; // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- Resetting a core test global.
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'credential_agent', 'author', 'credential_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'credential_agent', 'author', 'credential_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
@@ -810,7 +814,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_profile_lists_the_parents_agents() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'listed_agent', 'author', 'listed_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'listed_agent', 'author', 'listed_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$screen = new Profile_Screen();
 
@@ -835,7 +839,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_agent_capabilities_are_bounded_by_parent() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$parent    = get_userdata( $parent_id );
-		$agent     = $this->account->provision( 'bounded_agent', 'author', 'bounded_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'bounded_agent', 'author', 'bounded_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$this->assertTrue( user_can( $agent, 'publish_posts' ), 'The agent role applies while the parent has the capability.' );
@@ -868,7 +872,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_parent_is_checked_with_the_original_object() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'object_agent', 'editor', 'object_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'object_agent', 'editor', 'object_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$post_id = self::factory()->post->create( array( 'post_author' => $this->admin_id ) );
 
@@ -898,7 +902,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_agents_without_eligible_parent_are_suspended() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$parent    = get_userdata( $parent_id );
-		$agent     = $this->account->provision( 'suspended_agent', 'author', 'suspended_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'suspended_agent', 'author', 'suspended_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
@@ -949,7 +953,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'network_bounded', 'editor', 'network_bounded@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'network_bounded', 'editor', 'network_bounded@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$author_site  = (int) self::factory()->blog->create();
@@ -987,7 +991,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'member_bound', 'author', 'member_bound@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'member_bound', 'author', 'member_bound@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		// A role written directly, as WP-CLI does, bypasses the membership rule for agents.
@@ -1032,12 +1036,12 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'departing_agent', 'author', 'departing_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'departing_agent', 'author', 'departing_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
-		$render = function (): string {
+		$render = static function (): string {
 			ob_start();
-			$this->account->render_agents_removed_with_parent();
+			( new Agent_Lifecycle() )->render_agents_removed_with_parent();
 			return (string) ob_get_clean();
 		};
 
@@ -1070,7 +1074,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'homebound_agent', 'author', 'homebound_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'homebound_agent', 'author', 'homebound_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$site_id = (int) self::factory()->blog->create();
 
@@ -1128,7 +1132,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$parent_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$heir_id     = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent       = $this->account->provision( 'doomed_agent', 'author', 'doomed_agent@example.com', '', '', '', $parent_id );
+		$agent       = $this->provisioner->provision( 'doomed_agent', 'author', 'doomed_agent@example.com', '', '', '', $parent_id );
 		$other_agent = $this->provision_agent( 'surviving_agent', 'author' );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$post_id = $this->create_post( $agent->ID, 'publish' );
@@ -1151,7 +1155,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'contentful_agent', 'author', 'contentful_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'contentful_agent', 'author', 'contentful_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$post_id        = $this->create_post( $agent->ID, 'publish' );
 		$parent_post_id = $this->create_post( $parent_id, 'publish' );
@@ -1170,7 +1174,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_parent_content_cannot_go_to_own_agent() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'would_be_heir', 'author', 'would_be_heir@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'would_be_heir', 'author', 'would_be_heir@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$post_id = $this->create_post( $parent_id, 'publish' );
 
@@ -1208,8 +1212,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_reassignment_list_excludes_the_deleted_users_agents() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$other_id  = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'listed_agent', 'author', 'listed_agent@example.com', '', '', '', $parent_id );
-		$other     = $this->account->provision( 'other_agent', 'author', 'other_agent@example.com', '', '', '', $other_id );
+		$agent     = $this->provisioner->provision( 'listed_agent', 'author', 'listed_agent@example.com', '', '', '', $parent_id );
+		$other     = $this->provisioner->provision( 'other_agent', 'author', 'other_agent@example.com', '', '', '', $other_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$this->assertInstanceOf( \WP_User::class, $other );
 
@@ -1258,8 +1262,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_delete_screen_accounts_for_agent_content() {
 		$parent_id  = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$childless  = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$idle_agent = $this->account->provision( 'idle_agent', 'author', 'idle_agent@example.com', '', '', '', $childless );
-		$agent      = $this->account->provision( 'writing_agent', 'author', 'writing_agent@example.com', '', '', '', $parent_id );
+		$idle_agent = $this->provisioner->provision( 'idle_agent', 'author', 'idle_agent@example.com', '', '', '', $childless );
+		$agent      = $this->provisioner->provision( 'writing_agent', 'author', 'writing_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $idle_agent );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
@@ -1304,7 +1308,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$site_id   = get_current_blog_id();
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'network_agent', 'author', 'network_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'network_agent', 'author', 'network_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		remove_user_from_blog( $parent_id, $site_id );
@@ -1329,7 +1333,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$parent_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$receiver_id = self::factory()->user->create();
-		$agent       = $this->account->provision( 'wandering_agent', 'author', 'wandering_agent@example.com', '', '', '', $parent_id );
+		$agent       = $this->provisioner->provision( 'wandering_agent', 'author', 'wandering_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$other_site  = (int) self::factory()->blog->create();
@@ -1406,7 +1410,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		grant_super_admin( $parent_id );
-		$agent = $this->account->provision( 'lonely_agent', 'author', 'lonely_agent@example.com', '', '', '', $parent_id );
+		$agent = $this->provisioner->provision( 'lonely_agent', 'author', 'lonely_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$lonely_site = (int) self::factory()->blog->create();
@@ -1446,11 +1450,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$first_id    = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$second_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$receiver_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent       = $this->account->provision( 'heir_agent', 'author', 'heir_agent@example.com', '', '', '', $second_id );
+		$agent       = $this->provisioner->provision( 'heir_agent', 'author', 'heir_agent@example.com', '', '', '', $second_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		set_current_screen( 'users-network' );
-		$submit = function ( int $heir, string $choice ) use ( $site_id, $first_id, $second_id ): void {
+		$submit = static function ( int $heir, string $choice ) use ( $site_id, $first_id, $second_id ): void {
 			$_REQUEST['action'] = 'dodelete';
 			$_POST              = array(
 				'_wpnonce' => wp_create_nonce( 'ms-users-delete' ),
@@ -1458,7 +1462,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				'blog'     => array( $first_id => array( $site_id => $heir ) ),
 				'delete'   => array( $site_id => array( $first_id => $choice ) ),
 			);
-			$this->account->reject_agents_as_network_heirs();
+			( new Agent_Lifecycle() )->reject_agents_as_network_heirs();
 		};
 
 		$submit( $receiver_id, 'reassign' );
@@ -1491,7 +1495,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$parent_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$receiver_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent       = $this->account->provision( 'archivist_agent', 'author', 'archivist_agent@example.com', '', '', '', $parent_id );
+		$agent       = $this->provisioner->provision( 'archivist_agent', 'author', 'archivist_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$site_id = (int) self::factory()->blog->create();
@@ -1516,7 +1520,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$_REQUEST['action'] = 'remove';
 		$_REQUEST['user']   = (string) $parent_id;
 		ob_start();
-		$this->account->render_agents_removed_with_parent();
+		( new Agent_Lifecycle() )->render_agents_removed_with_parent();
 		$warning = (string) ob_get_clean();
 		restore_current_blog();
 		$this->assertStringContainsString( 'archivist_agent', $warning );
@@ -1544,7 +1548,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$site_id   = get_current_blog_id();
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'tidy_agent', 'author', 'tidy_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'tidy_agent', 'author', 'tidy_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$parent_post = $this->create_post( $parent_id, 'publish' );
 		$agent_post  = $this->create_post( $agent->ID, 'publish' );
@@ -1563,38 +1567,38 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_provision_validates_input() {
-		$empty_login = $this->account->provision( '   ', 'editor', 'a@example.com' );
+		$empty_login = $this->provisioner->provision( '   ', 'editor', 'a@example.com' );
 		$this->assertWPError( $empty_login );
 		$this->assertSame( 'wpai_agent_empty_login', $empty_login->get_error_code() );
 
-		$bad_role = $this->account->provision( 'test-agent', 'does-not-exist', 'a@example.com' );
+		$bad_role = $this->provisioner->provision( 'test-agent', 'does-not-exist', 'a@example.com' );
 		$this->assertWPError( $bad_role );
 		$this->assertSame( 'wpai_agent_role_not_assignable', $bad_role->get_error_code() );
 
-		$symbols_only = $this->account->provision( '!!!', 'editor', 'a@example.com' );
+		$symbols_only = $this->provisioner->provision( '!!!', 'editor', 'a@example.com' );
 		$this->assertWPError( $symbols_only );
 		$this->assertSame( 'wpai_agent_invalid_login', $symbols_only->get_error_code() );
 
 		// Like core's Add User form, an illegal character is rejected rather than stripped into another name.
-		$altered = $this->account->provision( 'foo+bar', 'editor', 'foobar@example.com' );
+		$altered = $this->provisioner->provision( 'foo+bar', 'editor', 'foobar@example.com' );
 		$this->assertWPError( $altered );
 		$this->assertSame( 'wpai_agent_invalid_login', $altered->get_error_code() );
 		$this->assertFalse( get_user_by( 'login', 'foobar_agent' ) );
 
 		$this->provision_agent( 'taken_agent' );
-		$taken = $this->account->provision( 'taken', 'editor', 'a@example.com' );
+		$taken = $this->provisioner->provision( 'taken', 'editor', 'a@example.com' );
 		$this->assertWPError( $taken );
 		$this->assertSame( 'wpai_agent_login_exists', $taken->get_error_code(), 'The suffixed login should be checked for collisions.' );
 
-		$no_email = $this->account->provision( 'no-email-agent', 'editor', '' );
+		$no_email = $this->provisioner->provision( 'no-email-agent', 'editor', '' );
 		$this->assertWPError( $no_email );
 		$this->assertSame( 'wpai_agent_empty_email', $no_email->get_error_code() );
 
-		$bad_email = $this->account->provision( 'bad-email-agent', 'editor', 'not-an-email' );
+		$bad_email = $this->provisioner->provision( 'bad-email-agent', 'editor', 'not-an-email' );
 		$this->assertWPError( $bad_email );
 		$this->assertSame( 'wpai_agent_invalid_email', $bad_email->get_error_code() );
 
-		$taken_email = $this->account->provision( 'taken-email-agent', 'editor', get_userdata( $this->admin_id )->user_email );
+		$taken_email = $this->provisioner->provision( 'taken-email-agent', 'editor', get_userdata( $this->admin_id )->user_email );
 		$this->assertWPError( $taken_email );
 		$this->assertSame( 'wpai_agent_email_exists', $taken_email->get_error_code() );
 	}
@@ -1605,8 +1609,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_provision_appends_login_suffix() {
-		$this->assertSame( 'writer_agent', Agent_Account::apply_login_suffix( 'writer' ) );
-		$this->assertSame( 'writer_agent', Agent_Account::apply_login_suffix( 'writer_agent' ) );
+		$this->assertSame( 'writer_agent', Agent_Provisioner::apply_login_suffix( 'writer' ) );
+		$this->assertSame( 'writer_agent', Agent_Provisioner::apply_login_suffix( 'writer_agent' ) );
 
 		$appended = $this->provision_agent( 'writer' );
 		$this->assertSame( 'writer_agent', $appended->user_login, 'A missing suffix should be appended.' );
@@ -1615,11 +1619,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$kept = $this->provision_agent( 'reviewer_agent' );
 		$this->assertSame( 'reviewer_agent', $kept->user_login, 'An existing suffix should not be doubled.' );
 
-		$suffix_only = $this->account->provision( Agent_Account::LOGIN_SUFFIX, 'editor', 'suffix@example.com' );
+		$suffix_only = $this->provisioner->provision( Agent_Provisioner::LOGIN_SUFFIX, 'editor', 'suffix@example.com' );
 		$this->assertWPError( $suffix_only );
 		$this->assertSame( 'wpai_agent_empty_login', $suffix_only->get_error_code(), 'The suffix alone is not a name.' );
 
-		$too_long = $this->account->provision( str_repeat( 'a', 58 ), 'editor', 'long@example.com' );
+		$too_long = $this->provisioner->provision( str_repeat( 'a', 58 ), 'editor', 'long@example.com' );
 		$this->assertWPError( $too_long );
 		$this->assertSame( 'wpai_agent_login_too_long', $too_long->get_error_code(), 'The suffix counts toward core\'s 60 character limit.' );
 	}
@@ -1633,7 +1637,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$subscriber_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
 		wp_set_current_user( $subscriber_id );
 
-		$result = $this->account->provision( 'unauthorized-agent', 'subscriber', 'x@example.com' );
+		$result = $this->provisioner->provision( 'unauthorized-agent', 'subscriber', 'x@example.com' );
 
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_cannot_create_users', $result->get_error_code() );
@@ -1657,7 +1661,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$manager_id = self::factory()->user->create( array( 'role' => 'wpai_agent_create_only' ) );
 		wp_set_current_user( $manager_id );
 
-		$result = $this->account->provision( 'escalating-agent', 'subscriber', 'x@example.com' );
+		$result = $this->provisioner->provision( 'escalating-agent', 'subscriber', 'x@example.com' );
 
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_cannot_promote_users', $result->get_error_code() );
@@ -1682,8 +1686,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$manager_id = self::factory()->user->create( array( 'role' => 'wpai_agent_no_edit_manager' ) );
 		wp_set_current_user( $manager_id );
 
-		$this->assertFalse( Agent_Account::current_user_can_provision() );
-		$result = $this->account->provision( 'unmanageable-agent', 'subscriber', 'x@example.com' );
+		$this->assertFalse( Agent_Provisioner::current_user_can_provision() );
+		$result = $this->provisioner->provision( 'unmanageable-agent', 'subscriber', 'x@example.com' );
 
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_cannot_manage_agents', $result->get_error_code() );
@@ -1713,16 +1717,16 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$manager_id = self::factory()->user->create( array( 'role' => 'wpai_agent_limited_manager' ) );
 		wp_set_current_user( $manager_id );
 
-		$assignable_roles = $this->account->get_assignable_roles();
+		$assignable_roles = $this->provisioner->get_assignable_roles();
 		$this->assertArrayHasKey( 'subscriber', $assignable_roles );
 		$this->assertArrayNotHasKey( 'editor', $assignable_roles );
 		$this->assertArrayNotHasKey( 'administrator', $assignable_roles );
 
-		$rejected = $this->account->provision( 'escalating-agent', 'editor', 'x@example.com' );
+		$rejected = $this->provisioner->provision( 'escalating-agent', 'editor', 'x@example.com' );
 		$this->assertWPError( $rejected );
 		$this->assertSame( 'wpai_agent_role_not_assignable', $rejected->get_error_code() );
 
-		$allowed = $this->account->provision( 'read-only-agent', 'subscriber', 'x@example.com' );
+		$allowed = $this->provisioner->provision( 'read-only-agent', 'subscriber', 'x@example.com' );
 		$this->assertInstanceOf( \WP_User::class, $allowed );
 		$this->assertSame( array( 'subscriber' ), $allowed->roles );
 	}
@@ -1782,8 +1786,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		add_filter( 'map_meta_cap', $deny_only_to_provisioner, 20, 3 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Filtering core capability mapping in a regression test.
 		add_action( 'edit_user_created_user', $record_creation ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Observing the core creation action in a regression test.
 		try {
-			$assignable_roles = $this->account->get_assignable_roles();
-			$result           = $this->account->provision( 'context-escalating-agent', 'wpai_agent_contextual_worker', 'x@example.com', '', '', '', $parent_id );
+			$assignable_roles = $this->provisioner->get_assignable_roles();
+			$result           = $this->provisioner->provision( 'context-escalating-agent', 'wpai_agent_contextual_worker', 'x@example.com', '', '', '', $parent_id );
 		} finally {
 			remove_filter( 'map_meta_cap', $deny_only_to_provisioner, 20 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Removing the test filter.
 			remove_action( 'edit_user_created_user', $record_creation ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Removing the test action.
@@ -1821,11 +1825,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$manager_id = self::factory()->user->create( array( 'role' => 'wpai_agent_editor_manager' ) );
 		wp_set_current_user( $manager_id );
 
-		$assignable = $this->account->get_assignable_roles();
+		$assignable = $this->provisioner->get_assignable_roles();
 		$this->assertArrayHasKey( 'editor', $assignable, 'A role is assignable when its only extra capability is inert for the agent.' );
 		$this->assertArrayNotHasKey( 'administrator', $assignable );
 
-		$agent = $this->account->provision( 'inert-cap-agent', 'editor', 'inert@example.com' );
+		$agent = $this->provisioner->provision( 'inert-cap-agent', 'editor', 'inert@example.com' );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$this->assertFalse( user_can( $agent, 'unfiltered_html' ), 'The provisioned agent must not gain what its provisioner lacks.' );
 	}
@@ -1839,7 +1843,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$plain = $this->provision_agent( 'plain_agent' );
 		$this->assertSame( 'plain_agent', $plain->display_name );
 
-		$named = $this->account->provision( 'named-agent', 'editor', 'owner@example.com', 'Content', 'Assistant', 'https://example.com/assistant' );
+		$named = $this->provisioner->provision( 'named-agent', 'editor', 'owner@example.com', 'Content', 'Assistant', 'https://example.com/assistant' );
 		$this->assertInstanceOf( \WP_User::class, $named );
 		$this->assertSame( 'Content Assistant', $named->display_name );
 		$this->assertSame( 'https://example.com/assistant', $named->user_url );
@@ -1991,9 +1995,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_agents_cannot_hold_roles_that_manage_the_site() {
-		$this->assertArrayNotHasKey( 'administrator', $this->account->get_assignable_roles(), 'The Add Agent role list should not offer Administrator.' );
+		$this->assertArrayNotHasKey( 'administrator', $this->provisioner->get_assignable_roles(), 'The Add Agent role list should not offer Administrator.' );
 
-		$rejected = $this->account->provision( 'chief_agent', 'administrator', 'chief_agent@example.com' );
+		$rejected = $this->provisioner->provision( 'chief_agent', 'administrator', 'chief_agent@example.com' );
 		$this->assertWPError( $rejected );
 		$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
 		$this->assertFalse( username_exists( 'chief_agent' ) );
@@ -2009,9 +2013,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			)
 		);
 		try {
-			$this->assertArrayHasKey( 'plugin_installer', $this->account->get_assignable_roles() );
-			$installer = $this->account->provision( 'installer_agent', 'plugin_installer', 'installer_agent@example.com' );
-			$bounded   = $this->account->provision( 'bounded_installer', 'plugin_installer', 'bounded_installer@example.com', '', '', '', self::factory()->user->create( array( 'role' => 'editor' ) ) );
+			$this->assertArrayHasKey( 'plugin_installer', $this->provisioner->get_assignable_roles() );
+			$installer = $this->provisioner->provision( 'installer_agent', 'plugin_installer', 'installer_agent@example.com' );
+			$bounded   = $this->provisioner->provision( 'bounded_installer', 'plugin_installer', 'bounded_installer@example.com', '', '', '', self::factory()->user->create( array( 'role' => 'editor' ) ) );
 		} finally {
 			remove_role( 'plugin_installer' );
 		}
@@ -2304,9 +2308,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$first_parent  = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$second_parent = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$agents        = array(
-			$this->account->provision( 'reissue_one', 'author', 'reissue_one@example.com', 'Reissue One', '', '', $first_parent ),
-			$this->account->provision( 'reissue_two', 'author', 'reissue_two@example.com', 'Reissue Two', '', '', $first_parent ),
-			$this->account->provision( 'reissue_three', 'author', 'reissue_three@example.com', 'Reissue Three', '', '', $second_parent ),
+			$this->provisioner->provision( 'reissue_one', 'author', 'reissue_one@example.com', 'Reissue One', '', '', $first_parent ),
+			$this->provisioner->provision( 'reissue_two', 'author', 'reissue_two@example.com', 'Reissue Two', '', '', $first_parent ),
+			$this->provisioner->provision( 'reissue_three', 'author', 'reissue_three@example.com', 'Reissue Three', '', '', $second_parent ),
 		);
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 		foreach ( $agents as $agent ) {
@@ -2468,7 +2472,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				'display_name' => 'Jane Parent',
 			)
 		);
-		$agent     = $this->account->provision( 'explained_agent', 'author', 'explained_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'explained_agent', 'author', 'explained_agent@example.com', '', '', '', $parent_id );
 		$human_id  = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
@@ -2555,9 +2559,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_deactivation_revokes_every_agent_credential() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$active    = $this->account->provision( 'active_agent', 'author', 'active_agent@example.com', '', '', '', $parent_id );
-		$suspended = $this->account->provision( 'orphan_agent', 'author', 'orphan_agent@example.com', '', '', '', $parent_id );
-		$idle      = $this->account->provision( 'idle_agent', 'author', 'idle_agent@example.com', '', '', '', $parent_id );
+		$active    = $this->provisioner->provision( 'active_agent', 'author', 'active_agent@example.com', '', '', '', $parent_id );
+		$suspended = $this->provisioner->provision( 'orphan_agent', 'author', 'orphan_agent@example.com', '', '', '', $parent_id );
+		$idle      = $this->provisioner->provision( 'idle_agent', 'author', 'idle_agent@example.com', '', '', '', $parent_id );
 		$human_id  = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$this->assertInstanceOf( \WP_User::class, $active );
 		$this->assertInstanceOf( \WP_User::class, $suspended );
@@ -2615,7 +2619,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_new_user_screen_renders_agent_fields() {
-		$screen = new New_User_Screen( $this->account );
+		$screen = new New_User_Screen( $this->provisioner );
 
 		$GLOBALS['pagenow'] = 'user-new.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
 
@@ -2660,7 +2664,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			15 => array( 'Profile', 'read', 'profile.php' ),
 		);
 
-		$screen = new New_User_Screen( $this->account );
+		$screen = new New_User_Screen( $this->provisioner );
 		$screen->add_submenu();
 
 		$slugs = array_values( array_column( $submenu['users.php'] ?? array(), 2 ) );
@@ -2698,7 +2702,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$redirect = $this->capture_redirect(
 			function () {
-				( new New_User_Screen( $this->account ) )->handle_create();
+				( new New_User_Screen( $this->provisioner ) )->handle_create();
 			}
 		);
 
@@ -2738,7 +2742,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		add_filter( 'wp_die_handler', $handler_filter ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Replacing core's die handler in a regression test.
 		$did_die = false;
 		try {
-			( new New_User_Screen( $this->account ) )->handle_create();
+			( new New_User_Screen( $this->provisioner ) )->handle_create();
 		} catch ( \RuntimeException $error ) {
 			$did_die = true;
 		} finally {
@@ -2776,7 +2780,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				return $location;
 			}
 		);
-		( new New_User_Screen( $this->account ) )->handle_create();
+		( new New_User_Screen( $this->provisioner ) )->handle_create();
 		$this->assertFalse( $redirected, 'Errors should not redirect, core re-renders the form.' );
 
 		// Core's validation would complain about the hidden password; the agent error replaces it.
@@ -2816,7 +2820,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$_POST['_wpnonce_create-user']    = $nonce;
 		$_REQUEST['_wpnonce_create-user'] = $nonce;
 
-		( new New_User_Screen( $this->account ) )->handle_create();
+		( new New_User_Screen( $this->provisioner ) )->handle_create();
 
 		// Any signup validation error makes core re-render the form instead of signing up a user.
 		$this->assertSame( array( 'wpai_agent_invalid_parent' ), $this->collect_create_user_errors( 'Stray_1', 'stray_agent@example.com' ), 'Only the actual reason should be shown.' );
@@ -2867,7 +2871,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$GLOBALS['pagenow']     = 'user-new.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
 		$_REQUEST['wpai_agent'] = '1';
 		ob_start();
-		( new New_User_Screen( $this->account ) )->render_fields( 'add-new-user' );
+		( new New_User_Screen( $this->provisioner ) )->render_fields( 'add-new-user' );
 		$output = (string) ob_get_clean();
 		revoke_super_admin( $network_admin_id );
 
@@ -2886,7 +2890,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				'display_name' => 'Chosen Parent',
 			)
 		);
-		$screen    = new New_User_Screen( $this->account );
+		$screen    = new New_User_Screen( $this->provisioner );
 		$nonce     = wp_create_nonce( 'create-user' );
 
 		$_POST['wpai_agent']              = '1';
@@ -2926,7 +2930,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_new_user_screen_ignores_regular_submissions() {
 		$_POST['user_login'] = 'human';
 
-		( new New_User_Screen( $this->account ) )->handle_create();
+		( new New_User_Screen( $this->provisioner ) )->handle_create();
 
 		$this->assertFalse( get_user_by( 'login', 'human' ) );
 	}
@@ -2938,7 +2942,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 */
 	public function test_profile_screen_explains_why_an_agent_is_suspended() {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'explaining_agent', 'author', 'explaining_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'explaining_agent', 'author', 'explaining_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 		$screen = new Profile_Screen();
 		$note   = static function () use ( $screen ): string {
@@ -3007,7 +3011,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'roaming_agent', 'author', 'roaming_agent@example.com', '', '', '', $parent_id );
+		$agent     = $this->provisioner->provision( 'roaming_agent', 'author', 'roaming_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
 		$active_site  = (int) self::factory()->blog->create( array( 'title' => 'Shared Site' ) );
@@ -3374,10 +3378,10 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$this->assertSame(
 			array( $human->user_login ),
-			$this->account->strip_agents_from_super_admins( array( $human->user_login, $agent->user_login ) ),
+			( new Agent_Lifecycle() )->strip_agents_from_super_admins( array( $human->user_login, $agent->user_login ) ),
 			'Agent logins should be dropped from the super admin list.'
 		);
-		$this->assertSame( 'not-an-array', $this->account->strip_agents_from_super_admins( 'not-an-array' ), 'Non-array values should pass through.' );
+		$this->assertSame( 'not-an-array', ( new Agent_Lifecycle() )->strip_agents_from_super_admins( 'not-an-array' ), 'Non-array values should pass through.' );
 
 		grant_super_admin( $agent->ID );
 
@@ -3413,11 +3417,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Checks whether any Agent Account safeguard is hooked in.
+	 * Checks whether any agent safeguard is hooked in.
 	 *
 	 * @since x.x.x
 	 *
-	 * @return bool True when an Agent Account callback is registered.
+	 * @return bool True when an authentication or capability rule is registered.
 	 */
 	private function agent_account_safeguards_registered(): bool {
 		global $wp_filter;
@@ -3430,7 +3434,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			foreach ( $wp_filter[ $hook_name ]->callbacks as $callbacks ) {
 				foreach ( $callbacks as $callback ) {
 					$function = $callback['function'] ?? null;
-					if ( is_array( $function ) && ( $function[0] ?? null ) instanceof Agent_Account ) {
+					if ( is_array( $function ) && ( ( $function[0] ?? null ) instanceof Agent_Authentication || ( $function[0] ?? null ) instanceof Agent_Capabilities ) ) {
 						return true;
 					}
 				}
@@ -3457,7 +3461,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				foreach ( $callbacks as $callback ) {
 					$function = $callback['function'] ?? null;
 					$object   = is_array( $function ) ? ( $function[0] ?? null ) : null;
-					if ( ! $object instanceof Agent_Account && ! $object instanceof Agent_Credentials ) {
+					if ( ! $object instanceof Agent_Authentication && ! $object instanceof Agent_Capabilities && ! $object instanceof Agent_Credentials ) {
 						continue;
 					}
 
