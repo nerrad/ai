@@ -12,6 +12,7 @@ const {
 	createAgent,
 	createApplicationPassword,
 	createHuman,
+	deleteAllUsers,
 	agentRequest,
 	loginAs,
 	addApplicationPasswordOnProfile,
@@ -23,7 +24,7 @@ test.describe( 'Agent Users Experiment', () => {
 	} );
 
 	test.afterAll( async ( { requestUtils } ) => {
-		await requestUtils.deleteAllUsers();
+		await deleteAllUsers( requestUtils );
 		await requestUtils.deleteAllPosts();
 	} );
 

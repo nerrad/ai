@@ -13,6 +13,7 @@ const {
 	createAgent,
 	createApplicationPassword,
 	createHuman,
+	deleteAllUsers,
 	loginAs,
 } = require( '../../utils/agent-users' );
 
@@ -29,7 +30,7 @@ test.describe( 'Agent Users across plugin deactivation', () => {
 	// The tests deactivate the plugin, so make sure it is active again for the specs that follow.
 	test.afterAll( async ( { requestUtils } ) => {
 		await requestUtils.activatePlugin( 'ai' );
-		await requestUtils.deleteAllUsers();
+		await deleteAllUsers( requestUtils );
 	} );
 
 	test( 'Deactivating revokes agent credentials and reactivation explains how to reissue them', async ( {

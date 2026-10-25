@@ -42,6 +42,42 @@ const createHuman = async ( requestUtils, role ) => {
 };
 
 /**
+ * Deletes every user except the root user and the signed-in administrator.
+ *
+ * Deleting a parent also deletes its agents. `RequestUtils::deleteAllUsers()`
+ * sends every request at once, so an agent's own request races its parent's
+ * and fails once the agent is already gone. The requests run one at a time
+ * here, skipping agents deleted along with their parent.
+ *
+ * @param {RequestUtils} requestUtils Request utils of the administrator.
+ */
+const deleteAllUsers = async ( requestUtils ) => {
+	const users = await requestUtils.rest( {
+		path: '/wp/v2/users',
+		params: { per_page: 100 },
+	} );
+
+	for ( const user of users ) {
+		if ( user.id === 1 || user.name === requestUtils.user.username ) {
+			continue;
+		}
+
+		try {
+			await requestUtils.rest( {
+				method: 'DELETE',
+				path: `/wp/v2/users/${ user.id }`,
+				params: { force: true, reassign: 1 },
+			} );
+		} catch ( error ) {
+			// `RequestUtils::rest()` throws the decoded error response.
+			if ( 'rest_user_invalid_id' !== error?.code ) {
+				throw error;
+			}
+		}
+	}
+};
+
+/**
  * Creates an agent through the Add Agent screen.
  *
  * @param {Object} admin            Admin fixture.
@@ -212,6 +248,7 @@ module.exports = {
 	PASSWORD,
 	uniqueSuffix,
 	createHuman,
+	deleteAllUsers,
 	createAgent,
 	createApplicationPassword,
 	agentRequest,
