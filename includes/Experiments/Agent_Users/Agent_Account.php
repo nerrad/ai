@@ -1441,7 +1441,8 @@ final class Agent_Account {
 
 		$rendered = false;
 		foreach ( $agents as $agent_id => $entry ) {
-			foreach ( array_keys( get_blogs_of_user( $agent_id ) ) as $site_id ) {
+			// Like core's own list, archived and spam sites are included. `wpmu_delete_user()` skips them, so without a choice the content there would be orphaned.
+			foreach ( array_keys( get_blogs_of_user( $agent_id, true ) ) as $site_id ) {
 				$site_id = (int) $site_id;
 				if ( is_user_member_of_blog( $entry['parent_id'], $site_id ) ) {
 					continue;

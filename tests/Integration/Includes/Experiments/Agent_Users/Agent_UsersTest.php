@@ -1140,11 +1140,16 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$other_site  = (int) self::factory()->blog->create();
 		$delete_site = (int) self::factory()->blog->create();
 		$empty_site  = (int) self::factory()->blog->create();
-		foreach ( array( $other_site, $delete_site ) as $site_id ) {
+		$archived    = (int) self::factory()->blog->create();
+		foreach ( array( $other_site, $delete_site, $archived ) as $site_id ) {
 			add_user_to_blog( $site_id, $agent->ID, 'author' );
 			add_user_to_blog( $site_id, $receiver_id, 'author' );
 		}
 		add_user_to_blog( $empty_site, $agent->ID, 'author' );
+		switch_to_blog( $archived ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Creating content on another site of the test network.
+		$this->create_post( $agent->ID, 'publish' );
+		restore_current_blog();
+		update_blog_status( $archived, 'archived', '1' );
 
 		switch_to_blog( $other_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Creating content on another site of the test network.
 		$post_id = $this->create_post( $agent->ID, 'publish' );
@@ -1160,6 +1165,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( sprintf( 'name="delete[%d][%d]"', $other_site, $agent->ID ), $output, 'Core\'s choice should be offered for the agent on that site.' );
 		$this->assertStringContainsString( sprintf( "name='blog[%d][%d]'", $agent->ID, $other_site ), $output );
+		$this->assertStringContainsString( sprintf( 'name="delete[%d][%d]"', $archived, $agent->ID ), $output, 'Archived sites should get the choice too, as on core\'s list.' );
 		$this->assertStringNotContainsString( "value='-1'", $output, 'The reassignment list should not offer a placeholder that would post -1 as the new author.' );
 		$this->assertStringNotContainsString( sprintf( '[%d][%d]', $empty_site, $agent->ID ), $output, 'Sites without agent content need no choice.' );
 		$this->assertStringNotContainsString( sprintf( 'delete[%d][%d]', get_current_blog_id(), $agent->ID ), $output, 'Agent content on the parent\'s sites follows the parent\'s choice.' );
