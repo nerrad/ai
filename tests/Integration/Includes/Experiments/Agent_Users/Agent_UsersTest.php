@@ -2417,7 +2417,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'type="hidden" name="wpai_agent" value="1"', $output );
 		$this->assertStringContainsString( 'Add User</a>', $output, 'Agent mode points back to the regular flow.' );
 		$this->assertStringContainsString( 'Agent usernames end with _agent.', $output, 'Agent mode explains the username suffix.' );
-		$this->assertStringContainsString( 'name="wpai_agent_parent" id="wpai_agent_parent" required', $output, 'Agent mode asks for a parent.' );
+		$this->assertMatchesRegularExpression( '/<select name="wpai_agent_parent" id="wpai_agent_parent"[^>]* required>/', $output, 'Agent mode asks for a parent.' );
 		$this->assertStringNotContainsString( 'selected', $output, 'No parent is preselected.' );
 
 		ob_start();

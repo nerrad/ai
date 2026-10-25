@@ -279,7 +279,7 @@ final class New_User_Screen {
 
 		echo '<table class="form-table" role="presentation"><tr class="form-field form-required">';
 		echo '<th scope="row"><label for="' . esc_attr( self::PARENT_FIELD ) . '">' . esc_html__( 'Parent user', 'ai' ) . ' <span class="description">' . esc_html__( '(required)', 'ai' ) . '</span></label></th>';
-		echo '<td><select name="' . esc_attr( self::PARENT_FIELD ) . '" id="' . esc_attr( self::PARENT_FIELD ) . '" required>';
+		echo '<td><select name="' . esc_attr( self::PARENT_FIELD ) . '" id="' . esc_attr( self::PARENT_FIELD ) . '" aria-describedby="' . esc_attr( self::PARENT_FIELD . '-description' ) . '" required>';
 		echo '<option value="">' . esc_html__( 'Select a user…', 'ai' ) . '</option>';
 		foreach ( $users as $user ) {
 			// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- The agent parent capability constant.
@@ -294,7 +294,7 @@ final class New_User_Screen {
 			);
 		}
 		echo '</select>';
-		echo '<p class="description">' . esc_html__( 'The agent acts on behalf of this user and can never do more than they can.', 'ai' ) . '</p>';
+		echo '<p class="description" id="' . esc_attr( self::PARENT_FIELD . '-description' ) . '">' . esc_html__( 'The agent acts on behalf of this user and can never do more than they can.', 'ai' ) . '</p>';
 		echo '</td></tr></table>';
 	}
 

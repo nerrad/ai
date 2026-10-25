@@ -51,6 +51,9 @@ test.describe( 'Agent Users Experiment', () => {
 		const parentField = page.getByLabel( 'Parent user' );
 		await expect( parentField ).toHaveAttribute( 'required', '' );
 		await expect( parentField ).toHaveValue( '' );
+		await expect( parentField ).toHaveAccessibleDescription(
+			'The agent acts on behalf of this user and can never do more than they can.'
+		);
 
 		const agent = await createAgent( admin, page, {
 			parentId: parent.id,
