@@ -2255,11 +2255,19 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		};
 		// phpcs:enable WordPressVIPMinimum.Variables.ServerVariables.BasicAuthentication, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound
 
+		// A request authenticating only with an Application Password has no logged-in user yet.
+		wp_set_current_user( 0 );
 		$result = $attempt( $agent->user_login, chunk_split( $revoked, 4, ' ' ) );
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_credentials_revoked', $result->get_error_code(), 'A revoked credential says it was revoked.' );
 		$this->assertStringContainsString( 'Ask Jane Parent', $result->get_error_message() );
 		$this->assertSame( 401, $result->get_error_data()['status'] );
+
+		// A request another mechanism authenticated, such as an OAuth plugin, is not overridden.
+		wp_set_current_user( $human_id );
+		$authenticated = $attempt( $agent->user_login, chunk_split( $revoked, 4, ' ' ) );
+		wp_set_current_user( 0 );
+		$this->assertNull( $authenticated, 'The agent failure should not replace another successful authentication.' );
 
 		$wrong_for_agent = $attempt( $agent->user_login, 'abcdabcdabcdabcdabcdabcd' );
 		$wrong_for_human = $attempt( get_userdata( $human_id )->user_login, 'abcdabcdabcdabcdabcdabcd' );

@@ -410,8 +410,9 @@ final class Agent_Credentials {
 		$this->agent_failure = null;
 
 		// Core's cookie check returns true for a request without a nonce, meaning
-		// "not authenticated by cookie"; only an earlier error takes precedence.
-		if ( is_wp_error( $result ) || null === $failure ) {
+		// "not authenticated by cookie"; only an earlier error takes precedence,
+		// and a request that authenticated some other way keeps working.
+		if ( is_wp_error( $result ) || null === $failure || is_user_logged_in() ) {
 			return $result;
 		}
 
