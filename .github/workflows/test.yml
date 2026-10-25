@@ -430,21 +430,23 @@ jobs:
           retention-days: 2
           if-no-files-found: ignore
 
-  # Keeps the "Run E2E tests" check name meaning "all E2E shards passed".
+  # Keeps the "Run E2E tests" check name meaning "all E2E shards and the multisite E2E tests passed".
   e2e-result:
     name: Run E2E tests
     runs-on: ubuntu-24.04
-    needs: e2e
+    needs: [ e2e, e2e-multisite ]
     if: always()
     permissions: {}
 
     steps:
-      - name: Check E2E shard results
+      - name: Check E2E results
         env:
           E2E_RESULT: ${{ needs.e2e.result }}
+          E2E_MULTISITE_RESULT: ${{ needs.e2e-multisite.result }}
         run: |
-          if [ "$E2E_RESULT" != "success" ]; then
+          if [ "$E2E_RESULT" != "success" ] || [ "$E2E_MULTISITE_RESULT" != "success" ]; then
             echo "E2E shards finished with result: $E2E_RESULT"
+            echo "Multisite E2E tests finished with result: $E2E_MULTISITE_RESULT"
             exit 1
           fi
 
