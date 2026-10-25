@@ -220,7 +220,7 @@ final class Profile_Screen {
 		echo '<strong>' . esc_html__( 'Agent account.', 'ai' ) . '</strong> ';
 		echo esc_html__( 'This account is used by software, such as an AI agent or a scheduled job, not by a person. It cannot log in with a password; use Application Passwords for API access.', 'ai' ) . ' ';
 		if ( null === $parent ) {
-			echo esc_html__( 'Its parent user no longer exists, so it is suspended: it cannot authenticate or do anything until it is deleted.', 'ai' );
+			echo esc_html__( 'It has no parent user, so it is suspended: it cannot authenticate or do anything until it is deleted.', 'ai' );
 		} elseif ( 'role_not_allowed' === $reason ) {
 			echo wp_kses(
 				sprintf(

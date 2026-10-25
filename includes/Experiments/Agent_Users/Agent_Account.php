@@ -1170,7 +1170,7 @@ final class Agent_Account {
 	 */
 	public function reject_suspended_agent_credentials( WP_Error $error, WP_User $user ): void {
 		$messages = array(
-			'no_parent'           => __( 'This agent is suspended because its parent user no longer exists.', 'ai' ),
+			'no_parent'           => __( 'This agent is suspended because it has no parent user.', 'ai' ),
 			'role_not_allowed'    => __( 'This agent is suspended on this site because its role manages the site, which agents cannot do.', 'ai' ),
 			'parent_not_member'   => __( 'This agent is suspended on this site because its parent user is not a member of it.', 'ai' ),
 			'parent_not_eligible' => __( 'This agent is suspended because its parent user can no longer have agents on this site.', 'ai' ),
