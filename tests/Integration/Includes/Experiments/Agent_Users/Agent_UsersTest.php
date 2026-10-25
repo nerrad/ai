@@ -1198,6 +1198,75 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests agent content on another site that has nobody to receive it.
+	 *
+	 * Like core, no choice is offered there, and the content is deleted with
+	 * the agent.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_agent_content_without_receiver_is_deleted_with_agent() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		grant_super_admin( $parent_id );
+		$agent = $this->account->provision( 'lonely_agent', 'author', 'lonely_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+
+		$lonely_site = (int) self::factory()->blog->create();
+		add_user_to_blog( $lonely_site, $agent->ID, 'author' );
+		switch_to_blog( $lonely_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Creating content on another site of the test network.
+		$post_id = $this->create_post( $agent->ID, 'publish' );
+		restore_current_blog();
+
+		set_current_screen( 'users-network' );
+		ob_start();
+		do_action( 'delete_user_form', wp_get_current_user(), array( $parent_id ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking the core hook in an integration test.
+		$output = (string) ob_get_clean();
+		$this->assertStringNotContainsString( sprintf( '[%d][%d]', $lonely_site, $agent->ID ), $output, 'A site without another user gets no choice, as on core\'s list.' );
+
+		revoke_super_admin( $parent_id );
+		wpmu_delete_user( $parent_id );
+
+		switch_to_blog( $lonely_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Reading content on another site of the test network.
+		$status = get_post_status( $post_id );
+		restore_current_blog();
+		$this->assertSame( 'trash', $status, 'The content should be deleted with the agent, like core deletes a user\'s content.' );
+	}
+
+	/**
+	 * Tests that agent content is only deleted for a network deletion request with a valid nonce.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_agent_content_deletion_requires_the_delete_screen_nonce() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$site_id   = get_current_blog_id();
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'guarded_agent', 'author', 'guarded_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+		$post_id = $this->create_post( $agent->ID, 'publish' );
+
+		$_POST = array(
+			'_wpnonce' => 'forged',
+			'delete'   => array( $site_id => array( $parent_id => 'delete' ) ),
+		);
+		remove_user_from_blog( $parent_id, $site_id );
+		wpmu_delete_user( $parent_id );
+
+		$this->assertSame( 'publish', get_post_status( $post_id ), 'A forged deletion choice should not delete content.' );
+	}
+
+	/**
 	 * Tests that a network deletion giving content to an agent deleted in the same request stops before any change.
 	 *
 	 * @since x.x.x
