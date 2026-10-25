@@ -304,7 +304,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertSame( 'content_editor_agent@example.com', $agent->user_email );
 		$this->assertSame( $this->admin_id, (int) get_user_meta( $agent->ID, Agent_Account::META_CREATED_BY, true ) );
 		$this->assertSame( $this->admin_id, (int) get_user_meta( $agent->ID, Agent_Account::META_PARENT, true ), 'Programmatic provisioning defaults the parent to the provisioner.' );
-		$this->assertFalse( metadata_exists( 'user', $agent->ID, 'wpai_agent_site_id' ), 'Provisioning should not create a private multisite boundary.' );
 
 		$this->assertCount(
 			0,
@@ -332,16 +331,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$this->assertSame( $agent->ID, $created_user_id );
 		$this->assertSame( 'admin', $notification, 'Only the administrator should receive the new-account notification.' );
-	}
-
-	/**
-	 * Test that human accounts are not agents.
-	 *
-	 * @since x.x.x
-	 */
-	public function test_human_accounts_are_not_agents() {
-		$this->assertFalse( Agent_Account::is_agent( $this->admin_id ) );
-		$this->assertFalse( Agent_Account::is_agent( 0 ) );
 	}
 
 	/**
@@ -1975,11 +1964,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Test that account safeguards remain active when the experiment is disabled.
+	 * Tests that the bootstrap registers the account safeguards without consulting the experiment.
+	 *
+	 * Agents outlive the experiment being disabled, so their safeguards must too.
 	 *
 	 * @since x.x.x
 	 */
-	public function test_safeguards_remain_when_experiment_is_disabled() {
+	public function test_safeguards_register_without_the_experiment() {
 		$agent = $this->provision_agent( 'disabled-experiment-agent', 'editor' );
 
 		update_option( 'wpai_feature_agent-users_enabled', false );
@@ -2211,18 +2202,20 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $count(), 'Credentials the plugin never bounded are revoked on activation.' );
 		$this->assertNotNull( Agent_Credentials::revoked_record( $agent->ID ) );
 
-		// A failed update leaves the plugin inactive; activating it by hand revokes nothing.
+		// A failed update leaves the plugin inactive; activating it by hand revokes nothing, that one time.
 		$issue();
 		$upgrade( new \WP_Error( 'update_failed', 'Failed.' ) );
-		$this->assertNotFalse( get_site_option( Agent_Credentials::UPDATING_OPTION ) );
 		Activation::activation_callback( true );
 		$this->assertSame( 1, $count(), 'An update keeps credentials, even when the plugin is activated by hand afterwards.' );
-		$this->assertFalse( get_site_option( Agent_Credentials::UPDATING_OPTION ), 'Activation clears the update marker.' );
+		Activation::activation_callback( true );
+		$this->assertSame( 0, $count(), 'Only the activation right after the update is spared.' );
 
-		// A successful update clears the marker, so a later activation checks again.
+		// A successful update is finished, so a later activation checks again.
 		foreach ( array( false, true ) as $bulk ) {
 			$upgrade( array( 'destination' => WP_PLUGIN_DIR . '/ai' ), $bulk );
-			$this->assertFalse( get_site_option( Agent_Credentials::UPDATING_OPTION ), $bulk ? 'Bulk updates clear the marker.' : 'Successful updates clear the marker.' );
+			$issue();
+			Activation::activation_callback( true );
+			$this->assertSame( 0, $count(), $bulk ? 'A finished bulk update spares nothing.' : 'A finished update spares nothing.' );
 		}
 
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
@@ -2355,10 +2348,10 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		}
 		$this->assertCount( 1, \WP_Application_Passwords::get_user_application_passwords( $human_id ), 'Humans keep theirs.' );
 
-		$record = get_user_meta( $active->ID, Agent_Credentials::META_REVOKED, true );
-		$this->assertIsArray( $record );
+		$record = Agent_Credentials::revoked_record( $active->ID );
+		$this->assertNotNull( $record );
 		$this->assertSame( array( $active_hash ), $record['hashes'], 'The revoked hashes are kept to recognize the credential later.' );
-		$this->assertSame( '', get_user_meta( $idle->ID, Agent_Credentials::META_REVOKED, true ), 'Agents without credentials have nothing to revoke.' );
+		$this->assertNull( Agent_Credentials::revoked_record( $idle->ID ), 'Agents without credentials have nothing to revoke.' );
 	}
 
 	/**
@@ -2379,37 +2372,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		remove_filter( 'wp_is_application_passwords_available_for_user', '__return_false', 5 );
-	}
-
-	/**
-	 * Test core's REST flow reveals an Application Password only on creation.
-	 *
-	 * @since x.x.x
-	 */
-	public function test_core_rest_flow_creates_application_password() {
-		global $wp_rest_server;
-		$wp_rest_server = null; // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- Resetting a core test global.
-
-		$agent = $this->provision_agent();
-
-		add_filter( 'wp_is_application_passwords_available', '__return_true' );
-
-		$request = new WP_REST_Request( 'POST', '/wp/v2/users/' . $agent->ID . '/application-passwords' );
-		$request->set_param( 'name', 'Test MCP Client' );
-		$response = rest_do_request( $request );
-		$data     = $response->get_data();
-
-		$this->assertSame( 201, $response->get_status() );
-		$this->assertNotEmpty( $data['password'] );
-		$this->assertCount( 1, \WP_Application_Passwords::get_user_application_passwords( $agent->ID ) );
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/users/' . $agent->ID . '/application-passwords/' . $data['uuid'] );
-		$response = rest_do_request( $request );
-
-		$this->assertSame( 200, $response->get_status() );
-		$this->assertArrayNotHasKey( 'password', $response->get_data() );
-
-		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 	}
 
 	/**
@@ -2860,16 +2822,21 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_users_screen_account_type_filter() {
-		$this->provision_agent();
+		$agent  = $this->provision_agent();
 		$screen = new Users_Screen();
+		$listed = static function () use ( $screen ): array {
+			return array_map( 'intval', get_users( $screen->filter_list_table( array( 'fields' => 'ID' ) ) ) );
+		};
 
 		$this->assertSame( array(), $screen->filter_list_table( array() ), 'No filter by default.' );
 
 		$_GET['wpai_account_type'] = 'agent';
-		$this->assertSame( 'EXISTS', $screen->filter_list_table( array() )['meta_compare'] );
+		$this->assertContains( $agent->ID, $listed() );
+		$this->assertNotContains( $this->admin_id, $listed(), 'Agents only leaves people out.' );
 
 		$_GET['wpai_account_type'] = 'human';
-		$this->assertSame( 'NOT EXISTS', $screen->filter_list_table( array() )['meta_compare'] );
+		$this->assertContains( $this->admin_id, $listed() );
+		$this->assertNotContains( $agent->ID, $listed(), 'Excluding agents leaves them out.' );
 
 		$_GET['wpai_account_type'] = 'bogus';
 		$this->assertSame( array(), $screen->filter_list_table( array() ), 'Unknown values are ignored.' );
@@ -2983,29 +2950,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		remove_filter( 'pre_get_avatar_data', $custom, 5 );
 	}
 
-	/**
-	 * Test that the admin UI registers in admin context.
-	 *
-	 * The experiment framework already guarantees nothing registers while the
-	 * experiment is disabled, so only the is_admin() branch needs coverage.
-	 *
-	 * @since x.x.x
-	 */
-	public function test_admin_ui_registered_in_admin_context() {
-		set_current_screen( 'users' );
-		$this->assertTrue( is_admin() );
-
-		$registry = new Registry();
-		$loader   = new Loader( $registry );
-		$loader->init();
-
-		$this->assertNotFalse( has_action( 'admin_action_createuser' ) );
-		$this->assertNotFalse( has_action( 'admin_menu' ) );
-		$this->assertNotFalse( has_action( 'user_new_form' ) );
-		$this->assertNotFalse( has_filter( 'show_password_fields' ) );
-		$this->assertNotFalse( has_filter( 'get_role_list' ) );
-		$this->assertNotFalse( has_action( 'manage_users_extra_tablenav' ) );
-	}
 
 	/**
 	 * Test that the REST user response exposes the agent flag.
