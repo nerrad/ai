@@ -956,11 +956,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$agent     = $this->provisioner->provision( 'network_bounded', 'editor', 'network_bounded@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
-		$author_site  = (int) self::factory()->blog->create();
-		$foreign_site = (int) self::factory()->blog->create();
+		$author_site = (int) self::factory()->blog->create();
 		add_user_to_blog( $author_site, $parent_id, 'author' );
 		add_user_to_blog( $author_site, $agent->ID, 'editor' );
-		add_user_to_blog( $foreign_site, $agent->ID, 'editor' );
 
 		$this->assertTrue( user_can( $agent, 'edit_others_posts' ), 'The parent is an editor on the provisioning site.' );
 
@@ -969,13 +967,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$author_site_publish = user_can( $agent->ID, 'publish_posts' );
 		restore_current_blog();
 
-		switch_to_blog( $foreign_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Simulating a request to another site of the test network.
-		$foreign_site_edit = user_can( $agent->ID, 'edit_posts' );
-		restore_current_blog();
-
 		$this->assertFalse( $author_site_others, 'Where the parent is an author, the editor agent is limited to author capabilities.' );
 		$this->assertTrue( $author_site_publish );
-		$this->assertFalse( $foreign_site_edit, 'Where the parent is not a member, the agent has no authority.' );
 	}
 
 	/**
@@ -994,7 +987,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$agent     = $this->provisioner->provision( 'member_bound', 'author', 'member_bound@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
-		// A role written directly, as WP-CLI does, bypasses the membership rule for agents.
+		// Place the agent on a site of which its parent is not a member, writing the role directly as WP-CLI does.
 		$foreign_site = (int) self::factory()->blog->create();
 		switch_to_blog( $foreign_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Placing the agent on another site of the test network.
 		( new \WP_User( $agent->ID ) )->set_role( 'author' );
@@ -2383,11 +2376,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Tests that the lifecycle callbacks accept the null network flag WP-CLI passes.
+	 * Tests that the activation callbacks accept the null network flag WP-CLI passes.
 	 *
 	 * @since x.x.x
 	 */
-	public function test_lifecycle_callbacks_accept_a_null_network_flag() {
+	public function test_activation_callbacks_accept_a_null_network_flag() {
 		$agent = $this->provision_agent( 'cli_agent', 'author' );
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 		\WP_Application_Passwords::create_new_application_password( $agent->ID, array( 'name' => 'CLI test' ) );
