@@ -171,6 +171,11 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 		} );
 		await row.hover();
 		await row.getByRole( 'link', { name: 'Remove', exact: true } ).click();
+		await expect(
+			page.getByText(
+				`Their agents will be removed from this site too: ${ agent.login }.`
+			)
+		).toBeVisible();
 		await page.getByRole( 'button', { name: 'Confirm Removal' } ).click();
 		await expect( page.locator( '#message' ) ).toContainText(
 			'User removed'
