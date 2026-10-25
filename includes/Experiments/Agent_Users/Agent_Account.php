@@ -108,6 +108,7 @@ final class Agent_Account {
 		add_filter( 'wp_is_application_passwords_available_for_user', array( $this, 'ensure_application_passwords' ), 10, 2 );
 		add_filter( 'map_meta_cap', array( $this, 'strip_unfiltered_html_from_agents' ), 10, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'map_parent_user_management' ), 10, 4 );
+		add_filter( 'map_meta_cap', array( $this, 'block_agent_credentials_without_network_safeguards' ), 10, 4 );
 		add_filter( 'map_meta_cap', array( $this, 'share_post_ownership' ), 10, 4 );
 		add_filter( 'user_has_cap', array( $this, 'grant_default_parent_capability' ), 10, 4 );
 		// Runs last so no other mapping can lift an agent above its parent.
@@ -1165,6 +1166,36 @@ final class Agent_Account {
 		}
 
 		return array( self::PARENT_CAP );
+	}
+
+	/**
+	 * Stops new agent credentials while the plugin is active on only some sites.
+	 *
+	 * An Application Password authenticates the agent on every site of the
+	 * network, but the safeguards bounding it run only where the plugin is
+	 * active. Without network activation, a credential created on one site
+	 * would work unbounded on the others, so only existing credentials can be
+	 * listed and revoked.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param array<int, string> $caps    Primitive capabilities resolved by `map_meta_cap()`.
+	 * @param string             $cap     The capability being checked.
+	 * @param int                $user_id The user the check runs for.
+	 * @param array<int, mixed>  $args    Additional arguments, starting with the target user ID.
+	 * @return array<int, string> Filtered primitive capabilities.
+	 */
+	public function block_agent_credentials_without_network_safeguards( array $caps, string $cap, int $user_id, array $args ): array {
+		if (
+			'create_app_password' !== $cap ||
+			empty( $args[0] ) ||
+			! self::is_agent( (int) $args[0] ) ||
+			self::can_enforce_network_safeguards()
+		) {
+			return $caps;
+		}
+
+		return array( 'do_not_allow' );
 	}
 
 	/**

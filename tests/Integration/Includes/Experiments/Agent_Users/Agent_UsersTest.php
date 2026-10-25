@@ -221,6 +221,32 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that per-site activation allows revoking agent credentials but not creating them.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_agent_credentials_cannot_be_created_without_network_activation() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'site_only_agent', 'author', 'site_only_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+		$this->assertTrue( user_can( $parent_id, 'create_app_password', $agent->ID ), 'The parent creates credentials while the plugin is network-active.' );
+
+		$this->set_ai_plugin_network_active( false );
+
+		$this->assertFalse( user_can( $parent_id, 'create_app_password', $agent->ID ), 'A credential created now would be unbounded on sites without the plugin.' );
+		$this->assertFalse( user_can( $this->admin_id, 'create_app_password', $agent->ID ), 'Not even a super admin may create one.' );
+		$this->assertTrue( user_can( $parent_id, 'list_app_passwords', $agent->ID ) );
+		$this->assertTrue( user_can( $parent_id, 'delete_app_passwords', $agent->ID ), 'Existing credentials can still be revoked.' );
+		$this->assertTrue( user_can( $this->admin_id, 'create_app_password', $parent_id ), 'Humans are unaffected.' );
+	}
+
+	/**
 	 * Tests that per-site activation cannot provision agents on multisite.
 	 *
 	 * @since x.x.x
