@@ -1630,18 +1630,24 @@ final class Agent_Account {
 	 * Validates the login for a new agent account.
 	 *
 	 * Applies the same rules core applies on the Add User screen, after
-	 * appending the agent suffix when it is missing.
+	 * appending the agent suffix when it is missing. Like core, a username
+	 * with characters sanitizing would remove is rejected rather than quietly
+	 * changed into a different one.
 	 *
 	 * @since x.x.x
 	 *
 	 * @param string $login The requested username.
-	 * @return string|\WP_Error The sanitized login, or an error when it cannot be used.
+	 * @return string|\WP_Error The login to store, or an error when it cannot be used.
 	 */
 	private function validate_login( string $login ) {
-		$login = sanitize_user( trim( $login ), true );
+		$login = trim( $login );
 
 		if ( '' === $login || self::LOGIN_SUFFIX === $login ) {
 			return new WP_Error( 'wpai_agent_empty_login', __( 'The agent username cannot be empty.', 'ai' ) );
+		}
+
+		if ( sanitize_user( $login, true ) !== $login ) {
+			return new WP_Error( 'wpai_agent_invalid_login', __( 'This username is invalid because it uses illegal characters. Please enter a valid username.', 'ai' ) );
 		}
 
 		$login = self::apply_login_suffix( $login );

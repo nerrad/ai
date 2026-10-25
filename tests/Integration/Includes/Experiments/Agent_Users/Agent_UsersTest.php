@@ -1350,7 +1350,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$symbols_only = $this->account->provision( '!!!', 'editor', 'a@example.com' );
 		$this->assertWPError( $symbols_only );
-		$this->assertSame( 'wpai_agent_empty_login', $symbols_only->get_error_code() );
+		$this->assertSame( 'wpai_agent_invalid_login', $symbols_only->get_error_code() );
+
+		// Like core's Add User form, an illegal character is rejected rather than stripped into another name.
+		$altered = $this->account->provision( 'foo+bar', 'editor', 'foobar@example.com' );
+		$this->assertWPError( $altered );
+		$this->assertSame( 'wpai_agent_invalid_login', $altered->get_error_code() );
+		$this->assertFalse( get_user_by( 'login', 'foobar_agent' ) );
 
 		$this->provision_agent( 'taken_agent' );
 		$taken = $this->account->provision( 'taken', 'editor', 'a@example.com' );
