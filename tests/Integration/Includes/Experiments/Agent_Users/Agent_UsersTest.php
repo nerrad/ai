@@ -132,6 +132,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		remove_role( 'wpai_agent_no_edit_manager' );
 		remove_role( 'wpai_agent_limited_manager' );
 		remove_role( 'wpai_agent_contextual_manager' );
+		remove_role( 'wpai_agent_contextual_worker' );
 		remove_role( 'wpai_agent_editor_manager' );
 		if ( is_multisite() ) {
 			revoke_super_admin( $this->admin_id );
@@ -686,29 +687,27 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			}
 		}
 
-		// A role that manages users without managing the site, which agents may hold.
+		// A role that removes and deletes users without managing the site, which agents may hold.
 		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
-			'user_manager',
-			'User Manager',
+			'user_remover',
+			'User Remover',
 			array(
-				'read'          => true,
-				'list_users'    => true,
-				'edit_users'    => true,
-				'promote_users' => true,
-				'remove_users'  => true,
-				'delete_users'  => true,
+				'read'         => true,
+				'list_users'   => true,
+				'remove_users' => true,
+				'delete_users' => true,
 			)
 		);
 		try {
-			$manager_agent   = $this->provision_agent( 'manager_child', 'user_manager' );
-			$manager_control = self::factory()->user->create( array( 'role' => 'user_manager' ) );
-			$this->assertSame( user_can( $manager_control, 'edit_user', $other_id ), user_can( $manager_agent, 'edit_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
+			$remover_agent   = $this->provision_agent( 'remover_child', 'user_remover' );
+			$remover_control = self::factory()->user->create( array( 'role' => 'user_remover' ) );
+			$this->assertSame( user_can( $remover_control, 'delete_user', $other_id ), user_can( $remover_agent, 'delete_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
 			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
 				// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
-				$this->assertFalse( user_can( $manager_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
+				$this->assertFalse( user_can( $remover_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
 			}
 		} finally {
-			remove_role( 'user_manager' );
+			remove_role( 'user_remover' );
 		}
 	}
 
@@ -1723,6 +1722,14 @@ class Agent_UsersTest extends WP_UnitTestCase {
 				'wpai_add_agents'                 => true,
 			)
 		);
+		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
+			'wpai_agent_contextual_worker',
+			'Contextual Agent Worker',
+			array(
+				'read'                            => true,
+				'wpai_test_contextual_capability' => true,
+			)
+		);
 
 		// A parent other than the provisioner, holding the capability the
 		// provisioner is denied, so only the provisioner check can catch it.
@@ -1746,13 +1753,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		add_action( 'edit_user_created_user', $record_creation ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Observing the core creation action in a regression test.
 		try {
 			$assignable_roles = $this->account->get_assignable_roles();
-			$result           = $this->account->provision( 'context-escalating-agent', 'wpai_agent_contextual_manager', 'x@example.com', '', '', '', $parent_id );
+			$result           = $this->account->provision( 'context-escalating-agent', 'wpai_agent_contextual_worker', 'x@example.com', '', '', '', $parent_id );
 		} finally {
 			remove_filter( 'map_meta_cap', $deny_only_to_provisioner, 20 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Removing the test filter.
 			remove_action( 'edit_user_created_user', $record_creation ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Removing the test action.
 		}
 
-		$this->assertArrayHasKey( 'wpai_agent_contextual_manager', $assignable_roles, 'The pre-creation comparison cannot see how the future agent will be filtered.' );
+		$this->assertArrayHasKey( 'wpai_agent_contextual_worker', $assignable_roles, 'The pre-creation comparison cannot see how the future agent will be filtered.' );
 		$this->assertWPError( $result );
 		$this->assertSame( 'wpai_agent_role_not_assignable', $result->get_error_code() );
 		$this->assertFalse( username_exists( 'context-escalating-agent' ), 'A failed post-creation check must roll the account back.' );
@@ -1960,6 +1967,29 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertWPError( $rejected );
 		$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
 		$this->assertFalse( username_exists( 'chief_agent' ) );
+
+		// Installing code, or editing other users, takes over the site as surely as changing its settings.
+		$takeover_roles = array(
+			'plugin_installer' => array(
+				'install_plugins'  => true,
+				'activate_plugins' => true,
+			),
+			'user_editor'      => array(
+				'list_users' => true,
+				'edit_users' => true,
+			),
+		);
+		foreach ( $takeover_roles as $slug => $capabilities ) {
+			add_role( $slug, $slug, array_merge( array( 'read' => true ), $capabilities ) ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
+			try {
+				$this->assertArrayNotHasKey( $slug, $this->account->get_assignable_roles() );
+				$rejected = $this->account->provision( $slug . '_agent', $slug, $slug . '_agent@example.com' );
+			} finally {
+				remove_role( $slug );
+			}
+			$this->assertWPError( $rejected, sprintf( 'The %s role manages the site, without manage_options too.', $slug ) );
+			$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
+		}
 
 		$agent = $this->provision_agent( 'promotable_agent', 'editor' );
 
