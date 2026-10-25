@@ -37,7 +37,7 @@ Agent management stays on core user screens because the underlying resource is a
 - **Human profiles** list the user's agents, so parents without access to the Users screen can reach them.
 - **The Users list** labels roles such as `Editor (agent of Jane)`, or marks the agent as suspended, provides account-type filtering, and replaces the password-reset action with credential management.
 - **Avatars** fall back to the plugin's flask for agents instead of the site's default avatar, so they stand out next to people wherever `get_avatar()` is used. An agent whose email has a Gravatar keeps it. Gravatar only falls back to public raster images, so the flask appears only on publicly reachable sites; elsewhere Gravatar shows its own default.
-- **REST user responses** expose the read-only `wpai_is_agent` and `wpai_agent_parent` fields, in every context, so clients can distinguish agent identities and render "Agent on behalf of Parent" bylines.
+- **REST user responses** expose the read-only `wpai_is_agent` and `wpai_agent_parent` fields, in every context, so clients can distinguish agent identities and render "Agent on behalf of Parent" bylines. `wpai_agent_parent` is the parent's user ID, so only the link itself is public: an anonymous client can look up the parent's name only when the parent is a published author, which core lists publicly anyway. It is `null` for people and for agents without a parent; `wpai_is_agent` tells them apart.
 
 ## Multisite
 
