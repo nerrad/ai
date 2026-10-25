@@ -138,11 +138,20 @@ class Agent_Users extends Abstract_Feature {
 	 *
 	 * Existing-agent management remains available so administrators can inspect
 	 * accounts and revoke their credentials while network activation is arranged.
+	 * Site administrators cannot change the activation themselves, so the notice
+	 * only appears on the screens for managing users, where it explains what is
+	 * missing.
 	 *
 	 * @since x.x.x
 	 */
 	public function render_network_activation_notice(): void {
-		if ( Agent_Account::can_enforce_network_safeguards() || ! current_user_can( 'manage_options' ) ) {
+		global $pagenow;
+
+		if (
+			! in_array( $pagenow, array( 'users.php', 'user-new.php', 'user-edit.php', 'profile.php' ), true ) ||
+			Agent_Account::can_enforce_network_safeguards() ||
+			! current_user_can( 'manage_options' )
+		) {
 			return;
 		}
 

@@ -279,6 +279,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$notice = (string) ob_get_clean();
 		$this->assertStringContainsString( 'network-activated', $notice );
 
+		$GLOBALS['pagenow'] = 'index.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
+		ob_start();
+		$this->experiment->render_network_activation_notice();
+		$this->assertSame( '', ob_get_clean(), 'Screens unrelated to users should not carry the notice.' );
+
 		$this->set_ai_plugin_network_active( true );
 		$this->assertTrue( Agent_Account::current_user_can_provision(), 'Provisioning should resume after network activation.' );
 	}
