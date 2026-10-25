@@ -1440,6 +1440,15 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$submit( $receiver_id, 'reassign' );
 		$submit( $agent->ID, 'delete' );
 
+		// WordPress 7.1 offers to attribute content with an empty list when the agent was the only other member.
+		$rejected_without_receiver = false;
+		try {
+			$submit( 0, 'reassign' );
+		} catch ( \WPDieException $exception ) {
+			$rejected_without_receiver = true;
+		}
+		$this->assertTrue( $rejected_without_receiver, 'Content to keep with nobody to receive it should stop the deletion, not be deleted.' );
+
 		$this->expectException( \WPDieException::class );
 		$submit( $agent->ID, 'reassign' );
 	}

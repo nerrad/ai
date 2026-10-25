@@ -1667,24 +1667,27 @@ final class Agent_Account {
 	}
 
 	/**
-	 * Stops a network deletion that gives content to an agent deleted in the same request.
+	 * Stops a network deletion that would lose content chosen to be kept.
 	 *
 	 * The agents of the users being deleted are deleted with them, so content
 	 * attributed to any of them would be deleted as well. WordPress 7.0's
 	 * network delete screen still lists them, and core removes the users from
 	 * their sites one by one, so `reject_agent_as_heir()` would only stop the
-	 * request partway through. Checking every choice before core's handler
-	 * runs makes the deletion all-or-nothing.
+	 * request partway through. Where the agent was the only other member of a
+	 * site, WordPress 7.1 offers to attribute the content with a list
+	 * `exclude_agents_from_reassignment()` leaves empty, and core then deletes
+	 * the content it was asked to keep. Checking every choice before core's
+	 * handler runs makes the deletion all-or-nothing.
 	 *
 	 * @since x.x.x
 	 */
 	public function reject_agents_as_network_heirs(): void {
 		if (
 			! is_network_admin() ||
-			! isset( $_REQUEST['action'], $_POST['_wpnonce'], $_POST['user'], $_POST['blog'] ) ||
+			! isset( $_REQUEST['action'], $_POST['_wpnonce'], $_POST['user'], $_POST['delete'] ) ||
 			'dodelete' !== $_REQUEST['action'] ||
 			! is_array( $_POST['user'] ) ||
-			! is_array( $_POST['blog'] ) ||
+			! is_array( $_POST['delete'] ) ||
 			// Core's handler rejects the request itself when the nonce is wrong.
 			! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'ms-users-delete' )
 		) {
@@ -1696,22 +1699,26 @@ final class Agent_Account {
 			$heirs_to_reject = array_merge( $heirs_to_reject, self::get_agent_ids( $user_id ) );
 		}
 
-		$choices = isset( $_POST['delete'] ) && is_array( $_POST['delete'] ) ? wp_unslash( $_POST['delete'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Only compared against a fixed value below.
-		foreach ( wp_unslash( $_POST['blog'] ) as $user_id => $sites ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Keys and values are cast to integers below.
-			if ( ! is_array( $sites ) ) {
+		$heirs = isset( $_POST['blog'] ) && is_array( $_POST['blog'] ) ? wp_unslash( $_POST['blog'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Values are cast to integers below.
+		foreach ( wp_unslash( $_POST['delete'] ) as $site_id => $site_choices ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Only compared against a fixed value below.
+			if ( ! is_array( $site_choices ) ) {
 				continue;
 			}
 
-			foreach ( $sites as $site_id => $heir ) {
-				if (
-					'reassign' !== ( $choices[ $site_id ][ $user_id ] ?? '' ) ||
-					! in_array( (int) $heir, $heirs_to_reject, true )
-				) {
+			foreach ( $site_choices as $user_id => $choice ) {
+				if ( 'reassign' !== $choice ) {
+					continue;
+				}
+
+				$heir = (int) ( $heirs[ $user_id ][ $site_id ] ?? 0 );
+				if ( $heir > 0 && ! in_array( $heir, $heirs_to_reject, true ) ) {
 					continue;
 				}
 
 				wp_die(
-					esc_html__( 'Content cannot be attributed to an agent of a user being deleted, because the agent is deleted too. Choose another user.', 'ai' ),
+					$heir > 0
+						? esc_html__( 'Content cannot be attributed to an agent of a user being deleted, because the agent is deleted too. Choose another user.', 'ai' )
+						: esc_html__( 'No user was chosen to receive the content, or nobody else on the site can. Choose another user, or choose to delete the content.', 'ai' ),
 					esc_html__( 'Choose another user', 'ai' ),
 					array(
 						'response'  => 400,
