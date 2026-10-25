@@ -1177,6 +1177,16 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		);
 		$this->assertStringNotContainsString( "value='{$agent->ID}'", $network_list );
 		$this->assertStringContainsString( "value='{$other->ID}'", $network_list );
+
+		// When the agent was the only other member, nobody is left to receive the content.
+		$only_agent = wp_dropdown_users(
+			array(
+				'name'    => sprintf( 'blog[%d][%d]', $parent_id, get_current_blog_id() ),
+				'include' => array( $agent->ID ),
+				'echo'    => false,
+			)
+		);
+		$this->assertStringNotContainsString( '<option', $only_agent, 'Leaving out the only candidate should not list every user instead.' );
 	}
 
 	/**

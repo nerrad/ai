@@ -1706,7 +1706,9 @@ final class Agent_Account {
 
 		// `WP_User_Query` ignores `exclude` when `include` is set.
 		if ( ! empty( $query_args['include'] ) ) {
-			$query_args['include'] = array_values( array_diff( wp_parse_id_list( $query_args['include'] ), $agent_ids ) );
+			$remaining = array_values( array_diff( wp_parse_id_list( $query_args['include'] ), $agent_ids ) );
+			// An empty `include` lists every user, so a list of only agents becomes a list of nobody.
+			$query_args['include'] = array() === $remaining ? array( 0 ) : $remaining;
 		} else {
 			// phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.PostNotIn_exclude -- Extends core's own exclusion on the delete screen.
 			$query_args['exclude'] = array_merge( wp_parse_id_list( $query_args['exclude'] ?? array() ), $agent_ids );
