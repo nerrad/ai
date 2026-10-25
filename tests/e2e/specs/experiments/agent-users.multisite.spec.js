@@ -152,6 +152,16 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 			201
 		);
 
+		// The network profile describes the agent across its sites.
+		await page.goto(
+			`/wp-admin/network/user-edit.php?user_id=${ agent.id }`
+		);
+		await expect(
+			page.locator( '.wpai-agent-account-type' )
+		).toContainText(
+			'and, on each site, can only do what both its role and that user allow.'
+		);
+
 		const mainMembers = await requestUtils.rest( {
 			path: '/wp/v2/users',
 			params: { context: 'edit', per_page: 100 },

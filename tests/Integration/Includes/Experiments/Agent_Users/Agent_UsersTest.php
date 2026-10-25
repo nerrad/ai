@@ -2663,6 +2663,42 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that the network profile names the sites where an agent is suspended.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_network_profile_names_sites_where_agent_is_suspended() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'roaming_agent', 'author', 'roaming_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+
+		$active_site  = (int) self::factory()->blog->create( array( 'title' => 'Shared Site' ) );
+		$foreign_site = (int) self::factory()->blog->create( array( 'title' => 'Foreign Site' ) );
+		add_user_to_blog( $active_site, $parent_id, 'editor' );
+		add_user_to_blog( $active_site, $agent->ID, 'author' );
+		// A role written directly, as WP-CLI does, on a site the parent does not belong to.
+		switch_to_blog( $foreign_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Placing the agent on another site of the test network.
+		( new \WP_User( $agent->ID ) )->set_role( 'author' );
+		restore_current_blog();
+
+		set_current_screen( 'user-edit-network' );
+		$_GET['user_id'] = (string) $agent->ID;
+		ob_start();
+		( new Profile_Screen() )->render_account_type();
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'It is suspended on Foreign Site,', $output );
+		$this->assertStringNotContainsString( 'Shared Site', $output, 'The agent is active where its parent is a member.' );
+		$this->assertStringNotContainsString( 'this site', $output, 'The network admin has no current site to describe.' );
+	}
+
+	/**
 	 * Test the profile screen hides the password block and marks the account.
 	 *
 	 * @since x.x.x

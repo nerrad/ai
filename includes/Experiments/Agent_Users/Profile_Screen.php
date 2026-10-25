@@ -43,6 +43,8 @@ final class Profile_Screen {
 		add_filter( 'show_password_fields', array( $this, 'hide_password_fields' ), 10, 2 );
 		add_filter( 'admin_title', array( $this, 'filter_admin_title' ) );
 		add_action( 'admin_notices', array( $this, 'render_account_type' ) );
+		// The network profile shows notices through its own hook.
+		add_action( 'network_admin_notices', array( $this, 'render_account_type' ) );
 		add_action( 'admin_notices', array( $this, 'render_created_notice' ) );
 		add_action( 'admin_print_styles-user-edit.php', array( $this, 'print_styles' ) );
 		add_action( 'admin_print_footer_scripts-user-edit.php', array( $this, 'print_script' ) );
@@ -223,6 +225,8 @@ final class Profile_Screen {
 		echo esc_html__( 'This account is used by software, such as an AI agent or a scheduled job, not by a person. It cannot log in with a password; use Application Passwords for API access.', 'ai' ) . ' ';
 		if ( null === $parent ) {
 			echo esc_html__( 'It has no parent user, so it is suspended: it cannot authenticate or do anything until it is deleted.', 'ai' );
+		} elseif ( is_network_admin() ) {
+			$this->render_network_status( $agent, $parent );
 		} elseif ( 'role_not_allowed' === $reason ) {
 			echo wp_kses(
 				sprintf(
@@ -261,6 +265,49 @@ final class Profile_Screen {
 			);
 		}
 		echo '</p>';
+	}
+
+	/**
+	 * Describes an agent's status across the network on the network profile.
+	 *
+	 * Suspension depends on the site, and the network admin has none, so the
+	 * note names the sites where the agent is suspended instead.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param \WP_User $agent       The agent.
+	 * @param \WP_User $parent_user The agent's parent.
+	 */
+	private function render_network_status( WP_User $agent, WP_User $parent_user ): void {
+		echo wp_kses(
+			sprintf(
+				/* translators: %s: Parent user display name. */
+				__( 'It acts on behalf of <strong>%s</strong> and, on each site, can only do what both its role and that user allow.', 'ai' ),
+				esc_html( $parent_user->display_name )
+			),
+			array( 'strong' => array() )
+		);
+
+		$suspended = array();
+		foreach ( array_keys( get_blogs_of_user( $agent->ID, true ) ) as $site_id ) {
+			switch_to_blog( (int) $site_id ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Suspension is evaluated per site.
+			if ( '' !== Agent_Account::get_suspension_reason( $agent->ID ) ) {
+				$suspended[] = get_bloginfo( 'name' );
+			}
+			restore_current_blog();
+		}
+
+		if ( array() === $suspended ) {
+			return;
+		}
+
+		echo ' ' . esc_html(
+			wp_sprintf(
+				/* translators: %l: Comma-separated list of site names. */
+				__( 'It is suspended on %l, where it cannot authenticate or do anything.', 'ai' ),
+				$suspended
+			)
+		);
 	}
 
 	/**
