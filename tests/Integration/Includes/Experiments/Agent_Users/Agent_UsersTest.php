@@ -2050,6 +2050,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'user-edit.php?user_id=' . $agents[0]->ID . '#application-passwords-section', $first_body );
 		$this->assertStringNotContainsString( 'Reissue Three', $first_body );
 
+		// Uninstalling deletes the plugin's options, but the revoked credentials are kept with the agents.
+		delete_site_option( Agent_Credentials::REISSUE_OPTION );
 		reset_phpmailer_instance();
 		Activation::activation_callback( true );
 		$this->assertCount( 0, tests_retrieve_phpmailer_instance()->mock_sent, 'Parents are told only once.' );
@@ -2072,6 +2074,16 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		\WP_Application_Passwords::create_new_application_password( $agents[1]->ID, array( 'name' => 'Reissued' ) );
 		$this->assertSame( '', $notice(), 'The notice goes once every agent has a new credential.' );
+
+		// Once no agent anywhere needs new credentials, the notice costs nothing on each admin page.
+		\WP_Application_Passwords::create_new_application_password( $agents[2]->ID, array( 'name' => 'Reissued' ) );
+		global $wpdb;
+		$notice();
+		// Core caches user queries, so a cached result would not show up as a query.
+		wp_cache_set_users_last_changed();
+		$queries = $wpdb->num_queries;
+		$notice();
+		$this->assertSame( $queries, $wpdb->num_queries, 'The notice should not query users while nothing is revoked.' );
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		remove_filter( 'wp_mail_from', $sender );
 	}

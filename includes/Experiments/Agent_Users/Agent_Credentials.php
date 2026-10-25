@@ -58,6 +58,18 @@ final class Agent_Credentials {
 	public const UPDATING_OPTION = 'wpai_agent_plugin_updating';
 
 	/**
+	 * Network option marking that some agent still has revoked credentials.
+	 *
+	 * The reissue notice runs on every admin page, so it reads this instead of
+	 * querying users while no agent needs new credentials.
+	 *
+	 * @since x.x.x
+	 *
+	 * @var string
+	 */
+	public const REISSUE_OPTION = 'wpai_agent_reissue_pending';
+
+	/**
 	 * The failed agent authentication of the current request, if any.
 	 *
 	 * @since x.x.x
@@ -155,6 +167,10 @@ final class Agent_Credentials {
 			++$revoked;
 		}
 
+		if ( $revoked > 0 ) {
+			update_site_option( self::REISSUE_OPTION, '1' );
+		}
+
 		return $revoked;
 	}
 
@@ -180,6 +196,11 @@ final class Agent_Credentials {
 
 		if ( false === get_site_option( self::UPDATING_OPTION ) ) {
 			self::revoke_all();
+		}
+
+		// Revoked credentials are user meta, which outlives uninstalling the plugin.
+		if ( array() !== self::revoked_agent_ids() ) {
+			update_site_option( self::REISSUE_OPTION, '1' );
 		}
 
 		delete_site_option( self::UPDATING_OPTION );
@@ -268,15 +289,25 @@ final class Agent_Credentials {
 	 *
 	 * The notice stays until each agent has a new Application Password, so a
 	 * parent who misses the email still sees it. It runs on every admin page,
-	 * so it starts from the agents with revoked credentials, usually none,
-	 * rather than from the current user's agents.
+	 * so it only looks for agents once credentials were revoked, and then
+	 * starts from those agents rather than from the current user's.
 	 *
 	 * @since x.x.x
 	 */
 	public function render_reissue_notice(): void {
+		if ( ! get_site_option( self::REISSUE_OPTION ) ) {
+			return;
+		}
+
+		$revoked_ids = self::revoked_agent_ids();
+		if ( array() === $revoked_ids ) {
+			update_site_option( self::REISSUE_OPTION, '0' );
+			return;
+		}
+
 		$user_id = get_current_user_id();
 		$links   = array();
-		foreach ( self::revoked_agent_ids() as $agent_id ) {
+		foreach ( $revoked_ids as $agent_id ) {
 			$agent  = get_userdata( $agent_id );
 			$parent = Agent_Account::get_parent( $agent_id );
 			if ( ! $agent instanceof \WP_User || null === $parent || $parent->ID !== $user_id || ! current_user_can( 'edit_user', $agent_id ) ) {
@@ -315,7 +346,12 @@ final class Agent_Credentials {
 	 * @param int $user_id User the Application Password was created for.
 	 */
 	public function forget_revoked_credentials( $user_id ): void {
-		delete_user_meta( (int) $user_id, self::META_REVOKED );
+		if ( ! delete_user_meta( (int) $user_id, self::META_REVOKED ) || array() !== self::revoked_agent_ids() ) {
+			return;
+		}
+
+		// Stored rather than deleted, so single-site installs load it with the other options.
+		update_site_option( self::REISSUE_OPTION, '0' );
 	}
 
 	/**
