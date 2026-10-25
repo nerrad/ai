@@ -313,22 +313,24 @@ final class Agent_Account {
 	/**
 	 * Checks whether a role manages the site, which agents may not do.
 	 *
-	 * Site management is identified by its capabilities rather than by role
-	 * name, so custom roles are covered as well.
+	 * Site management is identified by `manage_options` rather than by role
+	 * name, so custom administrative roles are covered as well. Everything
+	 * else a role grants, including installing plugins, stays bounded by the
+	 * parent's capabilities, so the parent decides whether an agent may do it.
 	 *
 	 * @since x.x.x
 	 *
 	 * @param string $role Role slug.
-	 * @return bool True when the role grants a site management capability, see `grants_site_management()`.
+	 * @return bool True when the role grants `manage_options`.
 	 */
 	public static function role_manages_site( string $role ): bool {
 		$role_object = wp_roles()->get_role( $role );
 
-		return $role_object instanceof WP_Role && self::grants_site_management( $role_object->capabilities );
+		return $role_object instanceof WP_Role && ! empty( $role_object->capabilities['manage_options'] );
 	}
 
 	/**
-	 * Checks whether a user holds a site management capability on the current site.
+	 * Checks whether a user holds `manage_options` on the current site.
 	 *
 	 * Agents are never given such a role, but WP-CLI, the bulk role change on
 	 * the Users screen, and direct writes can still assign one. The stored
@@ -338,65 +340,12 @@ final class Agent_Account {
 	 * @since x.x.x
 	 *
 	 * @param int $user_id User ID.
-	 * @return bool True when the user's roles or own capabilities grant site management.
+	 * @return bool True when the user's roles or own capabilities grant `manage_options`.
 	 */
 	private static function holds_site_management( int $user_id ): bool {
 		$user = get_userdata( $user_id );
 
-		return $user instanceof WP_User && self::grants_site_management( $user->allcaps );
-	}
-
-	/**
-	 * Checks whether a set of capabilities includes site management.
-	 *
-	 * Site management means changing the site's or the network's settings,
-	 * administering the network or the site's users, or installing, editing,
-	 * or updating the code it runs, which a leaked credential could use to
-	 * take over the whole site.
-	 *
-	 * @since x.x.x
-	 *
-	 * @param array<string, bool> $capabilities Capabilities keyed by name.
-	 * @return bool True when any site management capability is granted.
-	 */
-	private static function grants_site_management( array $capabilities ): bool {
-		$site_management = array(
-			'manage_options',
-			'install_plugins',
-			'activate_plugins',
-			'edit_plugins',
-			'update_plugins',
-			'delete_plugins',
-			'install_themes',
-			'edit_themes',
-			'update_themes',
-			'delete_themes',
-			'update_core',
-			'edit_files',
-			'unfiltered_upload',
-			// One step from Administrator on single site: setting an administrator's password, or promoting someone.
-			'edit_users',
-			'promote_users',
-			// Network administration, which core checks directly on multisite.
-			'manage_network',
-			'manage_network_options',
-			'manage_network_users',
-			'manage_network_plugins',
-			'manage_network_themes',
-			'manage_sites',
-			'create_sites',
-			'delete_sites',
-			'upgrade_network',
-			'setup_network',
-		);
-
-		foreach ( $site_management as $capability ) {
-			if ( ! empty( $capabilities[ $capability ] ) ) {
-				return true;
-			}
-		}
-
-		return false;
+		return $user instanceof WP_User && ! empty( $user->allcaps['manage_options'] );
 	}
 
 	/**

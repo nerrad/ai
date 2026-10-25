@@ -687,27 +687,29 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			}
 		}
 
-		// A role that removes and deletes users without managing the site, which agents may hold.
+		// A role that manages users without managing the site, which agents may hold.
 		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
-			'user_remover',
-			'User Remover',
+			'user_manager',
+			'User Manager',
 			array(
-				'read'         => true,
-				'list_users'   => true,
-				'remove_users' => true,
-				'delete_users' => true,
+				'read'          => true,
+				'list_users'    => true,
+				'edit_users'    => true,
+				'promote_users' => true,
+				'remove_users'  => true,
+				'delete_users'  => true,
 			)
 		);
 		try {
-			$remover_agent   = $this->provision_agent( 'remover_child', 'user_remover' );
-			$remover_control = self::factory()->user->create( array( 'role' => 'user_remover' ) );
-			$this->assertSame( user_can( $remover_control, 'delete_user', $other_id ), user_can( $remover_agent, 'delete_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
+			$manager_agent   = $this->provision_agent( 'manager_child', 'user_manager' );
+			$manager_control = self::factory()->user->create( array( 'role' => 'user_manager' ) );
+			$this->assertSame( user_can( $manager_control, 'edit_user', $other_id ), user_can( $manager_agent, 'edit_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
 			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
 				// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
-				$this->assertFalse( user_can( $remover_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
+				$this->assertFalse( user_can( $manager_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
 			}
 		} finally {
-			remove_role( 'user_remover' );
+			remove_role( 'user_manager' );
 		}
 	}
 
@@ -1977,27 +1979,29 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
 		$this->assertFalse( username_exists( 'chief_agent' ) );
 
-		// Installing code, or editing other users, takes over the site as surely as changing its settings.
-		$takeover_roles = array(
-			'plugin_installer' => array(
+		// Below `manage_options`, such as installing plugins, it is the parent's to allow.
+		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
+			'plugin_installer',
+			'Plugin Installer',
+			array(
+				'read'             => true,
 				'install_plugins'  => true,
 				'activate_plugins' => true,
-			),
-			'user_editor'      => array(
-				'list_users' => true,
-				'edit_users' => true,
-			),
+			)
 		);
-		foreach ( $takeover_roles as $slug => $capabilities ) {
-			add_role( $slug, $slug, array_merge( array( 'read' => true ), $capabilities ) ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
-			try {
-				$this->assertArrayNotHasKey( $slug, $this->account->get_assignable_roles() );
-				$rejected = $this->account->provision( $slug . '_agent', $slug, $slug . '_agent@example.com' );
-			} finally {
-				remove_role( $slug );
-			}
-			$this->assertWPError( $rejected, sprintf( 'The %s role manages the site, without manage_options too.', $slug ) );
-			$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
+		try {
+			$this->assertArrayHasKey( 'plugin_installer', $this->account->get_assignable_roles() );
+			$installer = $this->account->provision( 'installer_agent', 'plugin_installer', 'installer_agent@example.com' );
+			$bounded   = $this->account->provision( 'bounded_installer', 'plugin_installer', 'bounded_installer@example.com', '', '', '', self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		} finally {
+			remove_role( 'plugin_installer' );
+		}
+		$this->assertInstanceOf( \WP_User::class, $installer, 'A parent who can install plugins may give an agent a role that can.' );
+		$this->assertSame( '', Agent_Account::get_suspension_reason( $installer ) );
+		// On multisite, core already denies installing plugins to everyone but super admins.
+		if ( ! is_multisite() ) {
+			$this->assertWPError( $bounded, 'A parent who cannot install plugins cannot give an agent a role that can.' );
+			$this->assertSame( 'wpai_agent_role_exceeds_parent', $bounded->get_error_code() );
 		}
 
 		$agent = $this->provision_agent( 'promotable_agent', 'editor' );
