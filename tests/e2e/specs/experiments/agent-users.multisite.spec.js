@@ -122,6 +122,18 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 	// Users are not cleaned up: core's REST API cannot delete users on
 	// multisite, and every test creates uniquely named ones.
 
+	test( 'Add Agent shows only the agent form', async ( { admin, page } ) => {
+		await admin.visitAdminPage( 'user-new.php', 'wpai_agent=1' );
+
+		await expect(
+			page.getByRole( 'heading', { level: 1, name: 'Add Agent' } )
+		).toBeVisible();
+		await expect( page.locator( '#createuser' ) ).toBeVisible();
+		await expect( page.locator( '#adduser' ) ).toBeHidden();
+		await expect( page.locator( '#add-existing-user' ) ).toBeHidden();
+		await expect( page.locator( '#create-new-user' ) ).toBeHidden();
+	} );
+
 	test( 'Removing a parent from one site keeps their agent on the others', async ( {
 		admin,
 		page,

@@ -147,7 +147,9 @@ final class New_User_Screen {
 	 * Prints the stylesheet hiding human-only fields in agent mode.
 	 *
 	 * Core renders the rows unconditionally, so hiding them is a display
-	 * concern. The handler ignores their values either way.
+	 * concern. The handler ignores their values either way. On multisite,
+	 * core's form for adding an existing user to the site and the heading
+	 * telling the two forms apart are hidden too.
 	 *
 	 * @since x.x.x
 	 */
@@ -159,7 +161,11 @@ final class New_User_Screen {
 		echo '<style>
 			#createuser tr:has( #pass1, #send_user_notification, #noconfirmation ),
 			#createuser .user-pass2-wrap,
-			#createuser .pw-weak { display: none; }
+			#createuser .pw-weak,
+			#add-existing-user,
+			#add-existing-user + p,
+			#adduser,
+			#create-new-user { display: none; }
 		</style>';
 	}
 
