@@ -358,7 +358,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			'missing user'      => array( 'missing', 'author', 'wpai_agent_invalid_parent' ),
 			'agent parent'      => array( 'agent', 'author', 'wpai_agent_invalid_parent' ),
 			'ineligible parent' => array( 'subscriber', 'subscriber', 'wpai_agent_invalid_parent' ),
-			'role above parent' => array( 'editor', 'administrator', 'wpai_agent_role_exceeds_parent' ),
+			'role above parent' => array( 'author', 'editor', 'wpai_agent_role_exceeds_parent' ),
 		);
 	}
 
@@ -429,10 +429,10 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_agents_cannot_provision_agents_and_links_are_protected() {
-		$admin_agent = $this->provision_agent( 'provisioning_agent', 'administrator' );
-		$editor_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->provision_agent( 'provisioning_agent', 'editor' );
+		$editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 
-		wp_set_current_user( $admin_agent->ID );
+		wp_set_current_user( $agent->ID );
 		$result = $this->account->provision( 'grandchild', 'author', 'grandchild@example.com', '', '', '', $editor_id );
 
 		$this->assertWPError( $result );
@@ -441,7 +441,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		foreach ( array( Agent_Account::META_KEY, Agent_Account::META_PARENT ) as $meta_key ) {
 			$this->assertFalse(
-				(bool) apply_filters( "auth_user_meta_{$meta_key}", true, $meta_key, $admin_agent->ID, $this->admin_id, 'edit_user_meta', array() ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking core's meta authorization hook.
+				(bool) apply_filters( "auth_user_meta_{$meta_key}", true, $meta_key, $agent->ID, $this->admin_id, 'edit_user_meta', array() ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking core's meta authorization hook.
 				sprintf( '%s should not be writable through capability-checked meta APIs.', $meta_key )
 			);
 		}
@@ -666,12 +666,29 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			}
 		}
 
-		$admin_agent   = $this->provision_agent( 'admin_child', 'administrator' );
-		$admin_control = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$this->assertSame( user_can( $admin_control, 'edit_user', $other_id ), user_can( $admin_agent, 'edit_user', $other_id ), 'An Administrator agent keeps exactly its role\'s access to other users.' );
-		foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
-			// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
-			$this->assertFalse( user_can( $admin_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
+		// A role that manages users without managing the site, which agents may hold.
+		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
+			'user_manager',
+			'User Manager',
+			array(
+				'read'          => true,
+				'list_users'    => true,
+				'edit_users'    => true,
+				'promote_users' => true,
+				'remove_users'  => true,
+				'delete_users'  => true,
+			)
+		);
+		try {
+			$manager_agent   = $this->provision_agent( 'manager_child', 'user_manager' );
+			$manager_control = self::factory()->user->create( array( 'role' => 'user_manager' ) );
+			$this->assertSame( user_can( $manager_control, 'edit_user', $other_id ), user_can( $manager_agent, 'edit_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
+			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
+				// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
+				$this->assertFalse( user_can( $manager_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
+			}
+		} finally {
+			remove_role( 'user_manager' );
 		}
 	}
 
@@ -947,6 +964,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertFalse( is_user_member_of_blog( $agent->ID, $site_id ) );
 
 		add_user_to_blog( $site_id, $parent_id, 'editor' );
+		$as_manager = add_user_to_blog( $site_id, $agent->ID, 'administrator' );
+		$this->assertWPError( $as_manager, 'An agent never joins a site with a role that manages it.' );
+		$this->assertSame( 'wpai_agent_role_not_allowed', $as_manager->get_error_code() );
 		$this->assertTrue( add_user_to_blog( $site_id, $agent->ID, 'author' ), 'The agent may join a site its parent belongs to.' );
 
 		$other_site = (int) self::factory()->blog->create();
@@ -1537,7 +1557,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( 'editor', $assignable_roles );
 		$this->assertArrayNotHasKey( 'administrator', $assignable_roles );
 
-		$rejected = $this->account->provision( 'escalating-agent', 'administrator', 'x@example.com' );
+		$rejected = $this->account->provision( 'escalating-agent', 'editor', 'x@example.com' );
 		$this->assertWPError( $rejected );
 		$this->assertSame( 'wpai_agent_role_not_assignable', $rejected->get_error_code() );
 
@@ -1741,37 +1761,12 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	/**
 	 * Test that agents receive the capabilities of their assigned role.
 	 *
-	 * The `unfiltered_html` capability is the deliberate exception for
-	 * non-administrator agents; dedicated tests cover it.
+	 * The `unfiltered_html` capability is the deliberate exception; dedicated
+	 * tests cover it.
 	 *
 	 * @since x.x.x
 	 */
 	public function test_agents_receive_assigned_role_capabilities() {
-		$admin_agent = $this->provision_agent( 'admin-agent', 'administrator' );
-
-		// Compare against a plain administrator. The provisioning user is a
-		// super admin on multisite, and that status bypasses capability checks.
-		$human_admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$human_admin    = get_userdata( $human_admin_id );
-		$this->assertInstanceOf( \WP_User::class, $human_admin );
-
-		$administrator_capabilities = array(
-			'unfiltered_html',
-			'create_users',
-			'edit_users',
-			'promote_users',
-			'delete_users',
-			'activate_plugins',
-			'manage_options',
-		);
-		foreach ( $administrator_capabilities as $capability ) {
-			// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Comparing representative capabilities from the assigned role.
-			$this->assertSame( user_can( $human_admin, $capability ), user_can( $admin_agent, $capability ), sprintf( 'Administrator agents and humans should agree on %s.', $capability ) );
-		}
-
-		$this->assertTrue( user_can( $admin_agent, 'edit_user', $admin_agent->ID ), 'Core should allow the agent to edit itself when its role permits it.' );
-		$this->assertTrue( user_can( $admin_agent, 'create_app_password', $admin_agent->ID ), 'Core should allow the agent to manage its own credentials.' );
-
 		$editor_agent = $this->provision_agent( 'editor-agent', 'editor' );
 		$editor_id    = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$human_editor = get_userdata( $editor_id );
@@ -1782,6 +1777,9 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			$this->assertSame( user_can( $human_editor, $capability ), user_can( $editor_agent, $capability ), sprintf( 'Editor agents and humans should agree on %s.', $capability ) );
 		}
 
+		$this->assertTrue( user_can( $editor_agent, 'edit_user', $editor_agent->ID ), 'Core should allow the agent to edit itself.' );
+		$this->assertTrue( user_can( $editor_agent, 'create_app_password', $editor_agent->ID ), 'Core should allow the agent to manage its own credentials.' );
+
 		$editor_agent->add_cap( 'wpai_agent_test_capability' );
 		get_userdata( $this->admin_id )->add_cap( 'wpai_agent_test_capability' );
 		// phpcs:ignore WordPress.WP.Capabilities.Unknown -- Verifying a test-only custom capability.
@@ -1789,36 +1787,72 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Test that non-administrator agents lose `unfiltered_html`.
+	 * Test that agents lose `unfiltered_html`.
 	 *
 	 * @since x.x.x
 	 */
-	public function test_non_admin_agents_lose_unfiltered_html() {
+	public function test_agents_lose_unfiltered_html() {
 		$editor_agent = $this->provision_agent( 'filtered-agent', 'editor' );
-		$admin_agent  = $this->provision_agent( 'filtered-admin-agent', 'administrator' );
 		$editor_id    = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$admin_id     = self::factory()->user->create( array( 'role' => 'administrator' ) );
 
 		$editor_agent->add_cap( 'unfiltered_html' );
 		$this->assertFalse( user_can( $editor_agent, 'unfiltered_html' ), 'An Editor agent should not carry unfiltered_html.' );
 		$this->assertFalse( user_can( $editor_agent, 'edit_css' ), 'The strip should cover meta capabilities that resolve to unfiltered_html.' );
-		if ( ! is_multisite() ) {
-			$this->assertTrue( user_can( $editor_id, 'unfiltered_html' ), 'A human Editor keeps the single-site role default.' );
-			$this->assertTrue( user_can( $editor_id, 'edit_css' ), 'A human Editor keeps custom CSS access on single site.' );
+		if ( is_multisite() ) {
+			return;
 		}
 
-		$editor_agent->add_cap( 'manage_options' );
-		$this->assertSame(
-			user_can( $admin_id, 'unfiltered_html' ),
-			user_can( $editor_agent, 'unfiltered_html' ),
-			'Administrative agents should follow core regardless of their role name.'
-		);
+		$this->assertTrue( user_can( $editor_id, 'unfiltered_html' ), 'A human Editor keeps the single-site role default.' );
+		$this->assertTrue( user_can( $editor_id, 'edit_css' ), 'A human Editor keeps custom CSS access on single site.' );
+	}
 
-		$this->assertSame(
-			user_can( $admin_id, 'unfiltered_html' ),
-			user_can( $admin_agent, 'unfiltered_html' ),
-			'Administrator agents should follow core, like any other Administrator.'
-		);
+	/**
+	 * Tests that agents cannot be given a role that manages the site.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_agents_cannot_hold_roles_that_manage_the_site() {
+		$this->assertArrayNotHasKey( 'administrator', $this->account->get_assignable_roles(), 'The Add Agent role list should not offer Administrator.' );
+
+		$rejected = $this->account->provision( 'chief_agent', 'administrator', 'chief_agent@example.com' );
+		$this->assertWPError( $rejected );
+		$this->assertSame( 'wpai_agent_role_not_allowed', $rejected->get_error_code() );
+		$this->assertFalse( username_exists( 'chief_agent' ) );
+
+		$agent = $this->provision_agent( 'promotable_agent', 'editor' );
+
+		// The profile screen lists and accepts only the editable roles.
+		$GLOBALS['pagenow']  = 'user-edit.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
+		$_REQUEST['user_id'] = (string) $agent->ID;
+		$this->assertArrayNotHasKey( 'administrator', get_editable_roles(), 'The agent\'s profile should not offer Administrator.' );
+		$this->assertArrayHasKey( 'editor', get_editable_roles() );
+		$_REQUEST['user_id'] = (string) $this->admin_id;
+		$this->assertArrayHasKey( 'administrator', get_editable_roles(), 'Human profiles are unaffected.' );
+		unset( $_REQUEST['user_id'] );
+
+		$request = new WP_REST_Request( 'POST', '/wp/v2/users/' . $agent->ID );
+		$request->set_param( 'roles', array( 'administrator' ) );
+		$response = rest_do_request( $request );
+		$this->assertSame( 403, $response->get_status() );
+		$this->assertSame( 'wpai_agent_role_not_allowed', $response->as_error()->get_error_code() );
+		$this->assertSame( array( 'editor' ), get_userdata( $agent->ID )->roles );
+
+		// WP-CLI and the bulk role change write the role directly; the agent is then suspended.
+		get_userdata( $agent->ID )->set_role( 'administrator' );
+		$this->assertSame( 'role_not_allowed', Agent_Account::get_suspension_reason( $agent->ID ) );
+		$this->assertFalse( user_can( $agent->ID, 'read' ), 'A suspended agent should be denied everything.' );
+		$this->assertFalse( user_can( $agent->ID, 'manage_options' ) );
+
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'application_password_is_api_request', '__return_true' );
+		$created = \WP_Application_Passwords::create_new_application_password( $agent->ID, array( 'name' => 'Promoted' ) );
+		$this->assertIsArray( $created );
+		$result = wp_authenticate_application_password( null, $agent->user_login, $created[0] );
+		$this->assertWPError( $result, 'The credential should not authenticate while the agent manages the site.' );
+		$this->assertSame( 'wpai_agent_suspended', $result->get_error_code() );
+
+		get_userdata( $agent->ID )->set_role( 'editor' );
+		$this->assertSame( '', Agent_Account::get_suspension_reason( $agent->ID ), 'Another role lifts the suspension.' );
 	}
 
 	/**
@@ -1856,7 +1890,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_safeguards_remain_when_experiment_is_disabled() {
-		$agent = $this->provision_agent( 'disabled-experiment-agent', 'administrator' );
+		$agent = $this->provision_agent( 'disabled-experiment-agent', 'editor' );
 
 		update_option( 'wpai_feature_agent-users_enabled', false );
 		$this->remove_agent_account_safeguards();
@@ -1864,7 +1898,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		// This is the always-on bootstrap path, independent of feature loading.
 		Main::get_instance()->register_agent_account_safeguards();
 
-		$this->assertTrue( user_can( $agent, 'manage_options' ), 'The assigned role should remain authoritative.' );
+		$this->assertTrue( user_can( $agent, 'edit_others_posts' ), 'The assigned role should remain authoritative.' );
 
 		$reset = get_password_reset_key( $agent );
 		$this->assertWPError( $reset );

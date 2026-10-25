@@ -221,6 +221,15 @@ final class Profile_Screen {
 		echo esc_html__( 'This account is used by software, such as an AI agent or a scheduled job, not by a person. It cannot log in with a password; use Application Passwords for API access.', 'ai' ) . ' ';
 		if ( null === $parent ) {
 			echo esc_html__( 'Its parent user no longer exists, so it is suspended: it cannot authenticate or do anything until it is deleted.', 'ai' );
+		} elseif ( 'role_not_allowed' === $reason ) {
+			echo wp_kses(
+				sprintf(
+					/* translators: %s: Parent user display name. */
+					__( 'It acts on behalf of <strong>%s</strong>, but its role manages the site, which agents cannot do, so it is suspended here: it cannot authenticate or do anything on this site until it is given another role.', 'ai' ),
+					esc_html( $parent->display_name )
+				),
+				array( 'strong' => array() )
+			);
 		} elseif ( 'parent_not_member' === $reason ) {
 			echo wp_kses(
 				sprintf(

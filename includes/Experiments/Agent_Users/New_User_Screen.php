@@ -324,7 +324,7 @@ final class New_User_Screen {
 				'label'     => __( 'Add Agent', 'ai' ),
 				'intro'     => array(
 					__( 'Create an account for an AI agent, an MCP client, a scheduled job, or similar software. Agent accounts cannot log in with a password. They authenticate with an Application Password, which you create on the agent’s profile right after this step. Their work is attributed to the agent, and their access can be revoked without touching a human account. The email receives notifications about the agent’s activity.', 'ai' ),
-					__( 'Every agent acts on behalf of a parent user and can never do more than they can. Within that, the role defines what the agent can do; grant the smallest role that fits the work. An Administrator agent of an Administrator has the same wide access and operational risk as any other Administrator account.', 'ai' ),
+					__( 'Every agent acts on behalf of a parent user and can never do more than they can. Within that, the role defines what the agent can do; grant the smallest role that fits the work. Agents cannot have a role that manages the site, such as Administrator.', 'ai' ),
 				),
 			)
 		);

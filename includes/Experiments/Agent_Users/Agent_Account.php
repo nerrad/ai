@@ -103,6 +103,8 @@ final class Agent_Account {
 		add_filter( 'send_password_change_email', array( $this, 'skip_agent_password_change_email' ), 10, 2 );
 		add_action( 'wp_set_password', array( $this, 'restore_agent_password' ), 10, 3 );
 		add_filter( 'rest_request_before_callbacks', array( $this, 'reject_agent_password_over_rest' ), 10, 3 );
+		add_filter( 'rest_request_before_callbacks', array( $this, 'reject_site_management_roles_over_rest' ), 10, 3 );
+		add_filter( 'editable_roles', array( $this, 'keep_site_management_roles_from_agents' ) );
 		add_filter( 'wp_is_application_passwords_available_for_user', array( $this, 'ensure_application_passwords' ), 10, 2 );
 		add_filter( 'map_meta_cap', array( $this, 'strip_unfiltered_html_from_agents' ), 10, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'map_parent_user_management' ), 10, 4 );
@@ -180,12 +182,13 @@ final class Agent_Account {
 	}
 
 	/**
-	 * Checks whether an agent is suspended because its parent lends it no authority.
+	 * Checks whether an agent is suspended on the current site.
 	 *
 	 * An agent is suspended while its parent is missing or no longer allowed to
-	 * have agents. It keeps its account, content, and credentials, but cannot
-	 * authenticate or do anything until an administrator restores the parent's
-	 * eligibility or deletes the agent.
+	 * have agents, and wherever it holds a role that manages the site, which
+	 * agents may not have. It keeps its account, content, and credentials, but
+	 * cannot authenticate or do anything until an administrator fixes the cause
+	 * or deletes the agent.
 	 *
 	 * @since x.x.x
 	 *
@@ -199,21 +202,24 @@ final class Agent_Account {
 
 		$parent = self::get_parent( $agent );
 
-		// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- The agent parent capability constant.
-		return null === $parent || ! user_can( $parent, self::PARENT_CAP );
+		return null === $parent ||
+			// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- The agent parent capability constant.
+			! user_can( $parent, self::PARENT_CAP ) ||
+			self::holds_site_management( $agent instanceof WP_User ? $agent->ID : (int) $agent );
 	}
 
 	/**
 	 * Explains why an agent is suspended on the current site.
 	 *
 	 * Suspension is evaluated per site on multisite, because the parent's
-	 * membership and capabilities are site-specific.
+	 * membership and capabilities, and the agent's role, are site-specific.
 	 *
 	 * @since x.x.x
 	 *
 	 * @param \WP_User|int $agent Agent user object or user ID.
-	 * @return string `no_parent`, `parent_not_member`, `parent_not_eligible`, or an
-	 *                empty string for humans and active agents.
+	 * @return string `no_parent`, `role_not_allowed`, `parent_not_member`,
+	 *                `parent_not_eligible`, or an empty string for humans and
+	 *                active agents.
 	 */
 	public static function get_suspension_reason( $agent ): string {
 		if ( ! self::is_suspended( $agent ) ) {
@@ -225,11 +231,51 @@ final class Agent_Account {
 			return 'no_parent';
 		}
 
+		if ( self::holds_site_management( $agent instanceof WP_User ? $agent->ID : (int) $agent ) ) {
+			return 'role_not_allowed';
+		}
+
 		if ( is_multisite() && ! is_user_member_of_blog( $parent->ID ) && ! is_super_admin( $parent->ID ) ) {
 			return 'parent_not_member';
 		}
 
 		return 'parent_not_eligible';
+	}
+
+	/**
+	 * Checks whether a role manages the site, which agents may not do.
+	 *
+	 * Site management is identified by `manage_options` rather than by role
+	 * name, so custom administrative roles are covered as well.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param string $role Role slug.
+	 * @return bool True when the role grants `manage_options`.
+	 */
+	public static function role_manages_site( string $role ): bool {
+		$role_object = wp_roles()->get_role( $role );
+
+		return $role_object instanceof WP_Role && ! empty( $role_object->capabilities['manage_options'] );
+	}
+
+	/**
+	 * Checks whether a user holds `manage_options` on the current site.
+	 *
+	 * Agents are never given such a role, but WP-CLI, the bulk role change on
+	 * the Users screen, and direct writes can still assign one. The stored
+	 * capabilities are read instead of calling `user_can()`, whose result for
+	 * agents is decided by this check.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param int $user_id User ID.
+	 * @return bool True when the user's roles or own capabilities grant `manage_options`.
+	 */
+	private static function holds_site_management( int $user_id ): bool {
+		$user = get_userdata( $user_id );
+
+		return $user instanceof WP_User && ! empty( $user->allcaps['manage_options'] );
 	}
 
 	/**
@@ -475,6 +521,7 @@ final class Agent_Account {
 				! is_string( $role_slug ) ||
 				! isset( $role_details['name'] ) ||
 				! is_string( $role_details['name'] ) ||
+				self::role_manages_site( $role_slug ) ||
 				! $this->role_is_within_user_capabilities( $role_slug, get_current_user_id() )
 			) {
 				continue;
@@ -501,6 +548,10 @@ final class Agent_Account {
 		$authorized = self::authorize_provisioner();
 		if ( is_wp_error( $authorized ) ) {
 			return $authorized;
+		}
+
+		if ( self::role_manages_site( $role ) ) {
+			return new WP_Error( 'wpai_agent_role_not_allowed', __( 'Agents cannot have a role that manages the site, such as Administrator.', 'ai' ) );
 		}
 
 		// `get_assignable_roles()` only contains existing roles, so this also
@@ -574,11 +625,8 @@ final class Agent_Account {
 				continue;
 			}
 
-			/*
-			 * The agent-side strip makes `unfiltered_html` inert for roles
-			 * without `manage_options`, so it cannot represent escalation.
-			 */
-			if ( in_array( 'unfiltered_html', $required, true ) && empty( $role_object->capabilities['manage_options'] ) ) {
+			// Agents never hold `unfiltered_html`, so it cannot represent escalation.
+			if ( in_array( 'unfiltered_html', $required, true ) ) {
 				continue;
 			}
 
@@ -824,6 +872,75 @@ final class Agent_Account {
 	}
 
 	/**
+	 * Refuses REST requests that give an agent a role managing the site.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param mixed                $response Response to replace the handler's, or null.
+	 * @param array<string, mixed> $handler  Route handler.
+	 * @param \WP_REST_Request     $request  The request.
+	 * @return mixed The response, or an error for such role changes.
+	 */
+	public function reject_site_management_roles_over_rest( $response, array $handler, \WP_REST_Request $request ) {
+		if (
+			null !== $response ||
+			'GET' === $request->get_method() ||
+			! is_array( $request->get_param( 'roles' ) ) ||
+			1 !== preg_match( '#^/wp/v2/users/(\d+|me)$#', $request->get_route(), $matches )
+		) {
+			return $response;
+		}
+
+		$user_id = 'me' === $matches[1] ? get_current_user_id() : (int) $matches[1];
+		if ( ! self::is_agent( $user_id ) ) {
+			return $response;
+		}
+
+		foreach ( $request->get_param( 'roles' ) as $role ) {
+			if ( is_string( $role ) && self::role_manages_site( $role ) ) {
+				return new WP_Error(
+					'wpai_agent_role_not_allowed',
+					__( 'Agents cannot have a role that manages the site, such as Administrator.', 'ai' ),
+					array( 'status' => 403 )
+				);
+			}
+		}
+
+		return $response;
+	}
+
+	/**
+	 * Leaves roles that manage the site out of an agent's profile.
+	 *
+	 * Core uses the editable roles both for the role list on the user editing
+	 * screen and to validate the submitted role, so an agent cannot be given
+	 * such a role there. The bulk role change on the Users screen and WP-CLI
+	 * have no per-user check; `is_suspended()` covers agents given one anyway.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param mixed $roles Editable roles keyed by slug.
+	 * @return mixed The roles, without those managing the site when editing an agent.
+	 */
+	public function keep_site_management_roles_from_agents( $roles ) {
+		global $pagenow;
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Reading which profile is shown or saved; core verifies the save.
+		$user_id = isset( $_REQUEST['user_id'] ) ? absint( $_REQUEST['user_id'] ) : 0;
+		if ( ! is_array( $roles ) || 'user-edit.php' !== $pagenow || ! self::is_agent( $user_id ) ) {
+			return $roles;
+		}
+
+		return array_filter(
+			$roles,
+			static function ( $role ): bool {
+				return ! self::role_manages_site( (string) $role );
+			},
+			ARRAY_FILTER_USE_KEY
+		);
+	}
+
+	/**
 	 * Keeps Application Passwords available for agent accounts.
 	 *
 	 * Application Passwords are the built-in credential path for agents, so a
@@ -886,10 +1003,10 @@ final class Agent_Account {
 	}
 
 	/**
-	 * Strips `unfiltered_html` from agents without administrative access.
+	 * Strips `unfiltered_html` from agents.
 	 *
-	 * Some roles below Administrator carry `unfiltered_html`, most notably
-	 * Editor on single-site installations. For an agent that default is unsafe:
+	 * Some roles agents may hold carry `unfiltered_html`, most notably Editor
+	 * on single-site installations. For an agent that default is unsafe:
 	 * model output stored with it becomes stored XSS. Removing the capability
 	 * reinstates core's KSES filtering on content paths that use it.
 	 *
@@ -897,9 +1014,7 @@ final class Agent_Account {
 	 * capability name, so meta capabilities that core resolves to
 	 * `unfiltered_html`, such as `edit_css`, are covered as well. When core has
 	 * already denied the capability, on multisite or under
-	 * `DISALLOW_UNFILTERED_HTML`, the result passes through unchanged. The
-	 * administrative boundary uses `manage_options` rather than a role name so
-	 * custom roles and user-level capability filters follow core behavior.
+	 * `DISALLOW_UNFILTERED_HTML`, the result is the same.
 	 *
 	 * @since x.x.x
 	 *
@@ -910,10 +1025,6 @@ final class Agent_Account {
 	 */
 	public function strip_unfiltered_html_from_agents( array $caps, string $cap, int $user_id ): array {
 		if ( ! in_array( 'unfiltered_html', $caps, true ) || ! self::is_agent( $user_id ) ) {
-			return $caps;
-		}
-
-		if ( user_can( $user_id, 'manage_options' ) ) {
 			return $caps;
 		}
 
@@ -956,9 +1067,9 @@ final class Agent_Account {
 	 * such as the post being edited, so object-specific rules that apply to the
 	 * parent also bound the agent. An agent's authority is therefore both its
 	 * own role and its parent's current permissions, and demoting the parent
-	 * narrows their agents immediately. Suspended agents are denied everything,
-	 * including operations core allows without any capability, such as editing
-	 * their own profile and Application Passwords.
+	 * narrows their agents immediately. Suspended agents, see `is_suspended()`,
+	 * are denied everything, including operations core allows without any
+	 * capability, such as editing their own profile and Application Passwords.
 	 *
 	 * @since x.x.x
 	 *
@@ -974,8 +1085,7 @@ final class Agent_Account {
 		}
 
 		$parent = self::get_parent( $user_id );
-		// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- The agent parent capability constant.
-		if ( null === $parent || ! user_can( $parent, self::PARENT_CAP ) ) {
+		if ( null === $parent || self::is_suspended( $user_id ) ) {
 			return array( 'do_not_allow' );
 		}
 
@@ -1001,6 +1111,7 @@ final class Agent_Account {
 	public function reject_suspended_agent_credentials( WP_Error $error, WP_User $user ): void {
 		$messages = array(
 			'no_parent'           => __( 'This agent is suspended because its parent user no longer exists.', 'ai' ),
+			'role_not_allowed'    => __( 'This agent is suspended on this site because its role manages the site, which agents cannot do.', 'ai' ),
 			'parent_not_member'   => __( 'This agent is suspended on this site because its parent user is not a member of it.', 'ai' ),
 			'parent_not_eligible' => __( 'This agent is suspended because its parent user can no longer have agents on this site.', 'ai' ),
 		);
@@ -1170,7 +1281,7 @@ final class Agent_Account {
 	}
 
 	/**
-	 * Lets an agent join only sites its parent belongs to.
+	 * Lets an agent join only sites its parent belongs to, and never as a site manager.
 	 *
 	 * An agent acts on behalf of its parent, so it belongs only where the
 	 * parent does. A super admin parent has authority on every site, so their
@@ -1190,6 +1301,11 @@ final class Agent_Account {
 	public function keep_agents_on_parent_sites( $can_add, $user_id, $role, $blog_id ) {
 		if ( true !== $can_add || ! self::is_agent( (int) $user_id ) ) {
 			return $can_add;
+		}
+
+		// Core switches to the site before asking, so the role is that site's.
+		if ( is_string( $role ) && self::role_manages_site( $role ) ) {
+			return new WP_Error( 'wpai_agent_role_not_allowed', __( 'Agents cannot have a role that manages the site, such as Administrator.', 'ai' ) );
 		}
 
 		$parent = self::get_parent( (int) $user_id );
