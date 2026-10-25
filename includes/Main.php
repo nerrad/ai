@@ -48,6 +48,15 @@ final class Main {
 	private static $instance;
 
 	/**
+	 * Agent account safeguards, once registered.
+	 *
+	 * @since x.x.x
+	 *
+	 * @var \WordPress\AI\Experiments\Agent_Users\Agent_Account|null
+	 */
+	private ?Agent_Account $agent_account = null;
+
+	/**
 	 * Gets the (singleton) instance of the Main class.
 	 *
 	 * @since 0.8.0
@@ -128,14 +137,58 @@ final class Main {
 	 * This intentionally runs outside feature initialization. Agent accounts
 	 * remain in the database when the experiment is disabled, so their login,
 	 * password-reset, and content-filtering constraints must remain active as
-	 * well.
+	 * well. The safeguards only register once an agent may exist, and marking
+	 * the first agent registers them right away, so they are in force for the
+	 * rest of that request too.
 	 *
 	 * @since x.x.x
 	 *
 	 * @internal Public for integration testing.
 	 */
 	public function register_agent_account_safeguards(): void {
-		( new Agent_Account() )->register();
+		Agent_Account::register_parent_capability();
+		add_action( 'added_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
+		add_action( 'updated_user_meta', array( $this, 'register_safeguards_for_marked_agent' ), 10, 3 );
+
+		if ( ! Agent_Account::agents_may_exist() ) {
+			return;
+		}
+
+		$this->register_agent_safeguards_once();
+	}
+
+	/**
+	 * Registers the agent safeguards as soon as an account is marked as an agent.
+	 *
+	 * @since x.x.x
+	 *
+	 * @internal Hooked to `added_user_meta` and `updated_user_meta`.
+	 *
+	 * @param int    $meta_id  Meta ID.
+	 * @param int    $user_id  User ID.
+	 * @param string $meta_key Meta key.
+	 */
+	public function register_safeguards_for_marked_agent( $meta_id, $user_id, $meta_key ): void {
+		if ( Agent_Account::META_KEY !== $meta_key ) {
+			return;
+		}
+
+		update_site_option( Agent_Account::AGENTS_EXIST_OPTION, '1' );
+		$this->register_agent_safeguards_once();
+	}
+
+	/**
+	 * Registers the agent safeguards unless they are already in place.
+	 *
+	 * @since x.x.x
+	 */
+	private function register_agent_safeguards_once(): void {
+		if ( null !== $this->agent_account && false !== has_filter( 'map_meta_cap', array( $this->agent_account, 'limit_agents_to_parent' ) ) ) {
+			return;
+		}
+
+		$this->agent_account = new Agent_Account();
+		$this->agent_account->register();
 		( new Agent_Credentials() )->register();
 	}
 

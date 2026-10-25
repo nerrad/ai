@@ -55,7 +55,7 @@ Agent provisioning is available on multisite only when the plugin is network-act
 
 Provisioning and admin UI are loaded only when the environment supports WordPress AI and both the global AI features setting and the Agent Users experiment are enabled. The two feature settings are off by default.
 
-Security rules for existing agents are different: they register whenever the plugin is active, before optional AI requirements and feature toggles are evaluated. Disabling the experiment hides provisioning and management enhancements but does not turn existing agents back into ordinary interactive accounts. Their login, password-reset, `unfiltered_html`, and parent restrictions, including removal with the parent, remain in force.
+Security rules for existing agents are different: they register whenever the plugin is active and an agent may exist, before optional AI requirements and feature toggles are evaluated. Whether an agent may exist is kept in the `wpai_agents_exist` network option, so installs that never create one do not run the rules. Marking any account as an agent sets it and registers the rules for the rest of that request, a missing value is computed on the next request, and activation recomputes it to find agents written straight to the database while the plugin was inactive. Only the rule deciding who may have agents always runs, because creating the first agent needs it. Disabling the experiment hides provisioning and management enhancements but does not turn existing agents back into ordinary interactive accounts. Their login, password-reset, `unfiltered_html`, and parent restrictions, including removal with the parent, remain in force.
 
 To retire an agent, revoke its Application Passwords or delete the account and choose how to reassign its content. Disabling the experiment does not revoke credentials or delete accounts.
 
@@ -79,6 +79,7 @@ Stored metadata:
 - `wpai_agent` (`Agent_Account::META_KEY`) marks the account.
 - `wpai_agent_parent` (`Agent_Account::META_PARENT`) links the agent to its parent.
 - `wpai_agent_created_by` (`Agent_Account::META_CREATED_BY`) records the provisioner.
+- `wpai_agents_exist` (`Agent_Account::AGENTS_EXIST_OPTION`), a network option, records whether any agent may exist.
 
 `Agent_Account::PARENT_CAP` (`wpai_add_agents`) is the parent eligibility capability, `Agent_Account::is_suspended()` reports whether an agent currently has an eligible parent on the current site, and `Agent_Account::get_suspension_reason()` explains why it does not.
 

@@ -92,6 +92,66 @@ final class Agent_Account {
 	public const LOGIN_SUFFIX = '_agent';
 
 	/**
+	 * Network option recording whether any agent exists, `1` or `0`.
+	 *
+	 * The agent safeguards only register once an agent exists, so installs
+	 * that never create one do not run them on every request.
+	 *
+	 * @since x.x.x
+	 *
+	 * @var string
+	 */
+	public const AGENTS_EXIST_OPTION = 'wpai_agents_exist';
+
+	/**
+	 * Hooks the rule deciding who may have agents into WordPress.
+	 *
+	 * Unlike the other rules, it is needed before the first agent exists,
+	 * to choose that agent's parent.
+	 *
+	 * @since x.x.x
+	 */
+	public static function register_parent_capability(): void {
+		add_filter( 'user_has_cap', array( self::class, 'grant_default_parent_capability' ), 10, 4 );
+	}
+
+	/**
+	 * Checks whether any agent may exist, without querying users on every request.
+	 *
+	 * The answer is stored when first computed and set again whenever an
+	 * account is marked as an agent. It may stay `true` after the last agent
+	 * is gone, which only keeps the safeguards running; it is never `false`
+	 * while an agent exists, except for agents written straight to the
+	 * database while the plugin was active, which activation detects.
+	 *
+	 * @since x.x.x
+	 *
+	 * @return bool True when agents may exist.
+	 */
+	public static function agents_may_exist(): bool {
+		$flag = get_site_option( self::AGENTS_EXIST_OPTION );
+		if ( false === $flag ) {
+			$flag = self::refresh_agents_exist_flag();
+		}
+
+		return '1' === (string) $flag;
+	}
+
+	/**
+	 * Recomputes and stores whether any agent exists.
+	 *
+	 * @since x.x.x
+	 *
+	 * @return string `1` when an agent exists, otherwise `0`.
+	 */
+	public static function refresh_agents_exist_flag(): string {
+		$flag = self::agents_exist() ? '1' : '0';
+		update_site_option( self::AGENTS_EXIST_OPTION, $flag );
+
+		return $flag;
+	}
+
+	/**
 	 * Hooks the identity rules into WordPress.
 	 *
 	 * @since x.x.x
@@ -110,7 +170,6 @@ final class Agent_Account {
 		add_filter( 'map_meta_cap', array( $this, 'map_parent_user_management' ), 10, 4 );
 		add_filter( 'map_meta_cap', array( $this, 'block_agent_credentials_without_network_safeguards' ), 10, 4 );
 		add_filter( 'map_meta_cap', array( $this, 'share_post_ownership' ), 10, 4 );
-		add_filter( 'user_has_cap', array( $this, 'grant_default_parent_capability' ), 10, 4 );
 		// Runs last so no other mapping can lift an agent above its parent.
 		add_filter( 'map_meta_cap', array( $this, 'limit_agents_to_parent' ), PHP_INT_MAX, 4 );
 		add_action( 'wp_authenticate_application_password_errors', array( $this, 'reject_suspended_agent_credentials' ), 10, 2 );
@@ -1047,7 +1106,7 @@ final class Agent_Account {
 	 * @param \WP_User            $user    The user being checked.
 	 * @return array<string, bool> Filtered capabilities.
 	 */
-	public function grant_default_parent_capability( array $allcaps, array $caps, array $args, WP_User $user ): array {
+	public static function grant_default_parent_capability( array $allcaps, array $caps, array $args, WP_User $user ): array {
 		if ( ! in_array( self::PARENT_CAP, $caps, true ) ) {
 			return $allcaps;
 		}
