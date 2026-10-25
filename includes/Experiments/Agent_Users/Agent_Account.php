@@ -1505,14 +1505,18 @@ final class Agent_Account {
 		printf( '<input type="radio" id="reassign_option_%1$s" name="%2$s" value="reassign" required />', esc_attr( $id_suffix ), esc_attr( $name ) );
 		printf( '<label for="reassign_option_%1$s">%2$s</label> ', esc_attr( $id_suffix ), esc_html__( 'Attribute all content to another user.', 'ai' ) );
 		printf( '<label for="reassign_user_%1$s" class="screen-reader-text">%2$s</label>', esc_attr( $id_suffix ), esc_html__( 'Select a user to attribute the content to.', 'ai' ) );
+		/*
+		 * Like core's own lists on this screen, the first user is preselected:
+		 * a "Select a user" placeholder would post -1, which WordPress 7.0's
+		 * handler passes on as the new author without checking it.
+		 */
 		wp_dropdown_users(
 			array(
-				'show_option_none' => __( 'Select a user', 'ai' ),
-				'name'             => sprintf( 'blog[%d][%d]', $agent->ID, $site_id ),
-				'include'          => $site_users,
-				'show'             => 'display_name_with_login',
-				'id'               => 'reassign_user_' . $id_suffix,
-				'blog_id'          => $site_id,
+				'name'    => sprintf( 'blog[%d][%d]', $agent->ID, $site_id ),
+				'include' => $site_users,
+				'show'    => 'display_name_with_login',
+				'id'      => 'reassign_user_' . $id_suffix,
+				'blog_id' => $site_id,
 			)
 		);
 		echo '</li></ul></fieldset>';

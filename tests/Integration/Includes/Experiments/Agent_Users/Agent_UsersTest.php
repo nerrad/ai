@@ -1160,6 +1160,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( sprintf( 'name="delete[%d][%d]"', $other_site, $agent->ID ), $output, 'Core\'s choice should be offered for the agent on that site.' );
 		$this->assertStringContainsString( sprintf( "name='blog[%d][%d]'", $agent->ID, $other_site ), $output );
+		$this->assertStringNotContainsString( "value='-1'", $output, 'The reassignment list should not offer a placeholder that would post -1 as the new author.' );
 		$this->assertStringNotContainsString( sprintf( '[%d][%d]', $empty_site, $agent->ID ), $output, 'Sites without agent content need no choice.' );
 		$this->assertStringNotContainsString( sprintf( 'delete[%d][%d]', get_current_blog_id(), $agent->ID ), $output, 'Agent content on the parent\'s sites follows the parent\'s choice.' );
 
