@@ -2321,6 +2321,10 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	 * @since x.x.x
 	 */
 	public function test_new_user_screen_reports_errors_on_the_form() {
+		if ( is_multisite() ) {
+			$this->markTestSkipped( 'Core validates the form through edit_user() on single site only.' );
+		}
+
 		$nonce                            = wp_create_nonce( 'create-user' );
 		$_POST['wpai_agent']              = '1';
 		$_POST['user_login']              = '';
@@ -2355,6 +2359,61 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a failed agent submission on multisite stops core's signup with the agent error.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_new_user_screen_reports_errors_through_multisite_signup_validation() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$ineligible_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+
+		$nonce               = wp_create_nonce( 'create-user' );
+		$_POST['wpai_agent'] = '1';
+		// A valid agent username that core's signup rules for people reject.
+		$_POST['user_login']              = 'Stray_1';
+		$_POST['email']                   = 'stray_agent@example.com';
+		$_POST['role']                    = 'author';
+		$_POST['wpai_agent_parent']       = (string) $ineligible_id;
+		$_POST['_wpnonce_create-user']    = $nonce;
+		$_REQUEST['_wpnonce_create-user'] = $nonce;
+
+		( new New_User_Screen( $this->account ) )->handle_create();
+
+		// Any signup validation error makes core re-render the form instead of signing up a user.
+		$this->assertSame( array( 'wpai_agent_invalid_parent' ), $this->collect_create_user_errors( 'Stray_1', 'stray_agent@example.com' ), 'Only the actual reason should be shown.' );
+		$this->assertFalse( get_user_by( 'email', 'stray_agent@example.com' ) );
+	}
+
+	/**
+	 * Returns the errors core's create-user handler would show after a submission.
+	 *
+	 * Core validates the form with `edit_user()` on single site and with
+	 * `wpmu_validate_user_signup()` on multisite.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param string $login Submitted username.
+	 * @param string $email Submitted email.
+	 * @return array<int, string|int> Error codes.
+	 */
+	private function collect_create_user_errors( string $login, string $email ): array {
+		if ( is_multisite() ) {
+			return wpmu_validate_user_signup( $login, $email )['errors']->get_error_codes();
+		}
+
+		$errors = new \WP_Error();
+		$user   = new \stdClass();
+		do_action_ref_array( 'user_profile_update_errors', array( &$errors, false, &$user ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking a core hook in an integration test.
+
+		return $errors->get_error_codes();
+	}
+
+	/**
 	 * Test the form requires a parent and keeps it selected after a failed submission.
 	 *
 	 * @since x.x.x
@@ -2377,14 +2436,12 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$_REQUEST['_wpnonce_create-user'] = $nonce;
 
 		$screen->handle_create();
-		$errors = new \WP_Error();
-		$user   = new \stdClass();
-		do_action_ref_array( 'user_profile_update_errors', array( &$errors, false, &$user ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking a core hook in an integration test.
-		$this->assertSame( array( 'wpai_agent_parent_required' ), $errors->get_error_codes(), 'The form should not fall back to the provisioner.' );
+		$this->assertSame( array( 'wpai_agent_parent_required' ), $this->collect_create_user_errors( 'parentless', 'parentless@example.com' ), 'The form should not fall back to the provisioner.' );
 		$this->assertFalse( get_user_by( 'login', 'parentless_agent' ) );
 
 		// A failed submission for another reason re-renders with the chosen parent.
 		remove_all_actions( 'user_profile_update_errors' );
+		remove_all_filters( 'wpmu_validate_user_signup' );
 		$_POST['wpai_agent_parent'] = (string) $parent_id;
 		$_POST['role']              = 'administrator';
 		$screen->handle_create();

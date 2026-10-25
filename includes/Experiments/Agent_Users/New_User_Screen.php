@@ -404,7 +404,8 @@ JS;
 	 *
 	 * This runs before core's create-user handler. Success redirects before core
 	 * can create a second account; failure is passed into core's form errors so
-	 * submitted values and accessibility behavior are preserved.
+	 * submitted values and accessibility behavior are preserved, and core
+	 * creates no account.
 	 *
 	 * @since x.x.x
 	 */
@@ -441,6 +442,31 @@ JS;
 			: $this->account->provision( $login, $role, $email, $first_name, $last_name, $url, $parent_id );
 
 		if ( is_wp_error( $result ) ) {
+			if ( is_multisite() ) {
+				/*
+				 * Core's multisite handler validates the signup instead of
+				 * calling `edit_user()`, so `user_profile_update_errors` never
+				 * fires there. Without an error from that validation, core would
+				 * go on to sign up an ordinary user with the submitted role.
+				 * Provisioning validates the agent's username and email itself,
+				 * so core's stricter signup rules for people, such as lowercase
+				 * usernames, would only hide the actual reason.
+				 */
+				add_filter(
+					'wpmu_validate_user_signup',
+					static function ( $signup ) use ( $result ) {
+						if ( is_array( $signup ) ) {
+							$signup['errors'] = new WP_Error( $result->get_error_code(), $result->get_error_message() );
+						}
+
+						return $signup;
+					},
+					// Last, so no later filter can rebuild the errors and let core sign the user up.
+					PHP_INT_MAX
+				);
+				return;
+			}
+
 			add_action(
 				'user_profile_update_errors',
 				function ( WP_Error $errors ) use ( $result ): void {
