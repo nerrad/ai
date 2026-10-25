@@ -11,6 +11,7 @@ declare( strict_types=1 );
 namespace WordPress\AI\Experiments\Agent_Users;
 
 use WP_Error;
+use WP_User;
 
 // Exit if accessed directly.
 defined( 'ABSPATH' ) || exit;
@@ -248,10 +249,24 @@ final class New_User_Screen {
 			)
 		);
 
-		// A super admin is often not a member of the site, but may still be the parent.
-		$current_user = wp_get_current_user();
-		if ( ! in_array( $current_user->ID, array_map( 'intval', wp_list_pluck( $users, 'ID' ) ), true ) ) {
-			array_unshift( $users, $current_user );
+		// Super admins are often not members of the site, but may still be the parent.
+		if ( is_multisite() ) {
+			$listed = array_map( 'intval', wp_list_pluck( $users, 'ID' ) );
+			foreach ( get_super_admins() as $login ) {
+				$super_admin = get_user_by( 'login', $login );
+				if ( ! $super_admin instanceof WP_User || in_array( $super_admin->ID, $listed, true ) || Agent_Account::is_agent( $super_admin ) ) {
+					continue;
+				}
+
+				$users[] = $super_admin;
+			}
+
+			usort(
+				$users,
+				static function ( $a, $b ): int {
+					return strcasecmp( $a->display_name, $b->display_name );
+				}
+			);
 		}
 
 		$selected = self::submitted_parent_id();

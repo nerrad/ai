@@ -2420,6 +2420,33 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that the parent selector offers super admins who are not members of the site.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_new_user_screen_offers_super_admins_who_are_not_site_members() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$network_admin_id = self::factory()->user->create( array( 'display_name' => 'Network Overseer' ) );
+		grant_super_admin( $network_admin_id );
+		remove_user_from_blog( $network_admin_id, get_current_blog_id() );
+		$this->assertFalse( is_user_member_of_blog( $network_admin_id ) );
+
+		$GLOBALS['pagenow']     = 'user-new.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
+		$_REQUEST['wpai_agent'] = '1';
+		ob_start();
+		( new New_User_Screen( $this->account ) )->render_fields( 'add-new-user' );
+		$output = (string) ob_get_clean();
+		revoke_super_admin( $network_admin_id );
+
+		$this->assertStringContainsString( '<option value="' . $network_admin_id . '">Network Overseer', $output, 'Provisioning accepts any super admin as the parent, so the form should offer them.' );
+	}
+
+	/**
 	 * Test the form requires a parent and keeps it selected after a failed submission.
 	 *
 	 * @since x.x.x
