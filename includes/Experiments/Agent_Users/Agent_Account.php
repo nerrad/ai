@@ -124,6 +124,7 @@ final class Agent_Account {
 		}
 
 		add_filter( 'pre_update_site_option_site_admins', array( $this, 'strip_agents_from_super_admins' ) );
+		add_filter( 'can_add_user_to_blog', array( $this, 'keep_agents_on_parent_sites' ), 10, 4 );
 		add_action( 'remove_user_from_blog', array( $this, 'remove_agents_of_removed_user' ), 10, 3 );
 		add_action( 'wpmu_delete_user', array( $this, 'delete_agents_of_deleted_network_user' ) );
 		add_action( 'load-users.php', array( $this, 'reject_agents_as_network_heirs' ) );
@@ -1166,6 +1167,37 @@ final class Agent_Account {
 		foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
 			wp_delete_user( $agent_id, $reassign );
 		}
+	}
+
+	/**
+	 * Lets an agent join only sites its parent belongs to.
+	 *
+	 * An agent acts on behalf of its parent, so it belongs only where the
+	 * parent does. A super admin parent has authority on every site, so their
+	 * agents may join any site. This covers every path through
+	 * `add_user_to_blog()`, such as adding an existing user to a site. Paths
+	 * that write a role directly, such as WP-CLI, bypass it, and the per-site
+	 * suspension in `is_suspended()` covers those.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param true|\WP_Error $can_add Whether the user can be added.
+	 * @param int|string     $user_id User ID.
+	 * @param string         $role    Role slug for the site.
+	 * @param int|string     $blog_id Site ID.
+	 * @return true|\WP_Error True, or an error for agents that cannot join the site.
+	 */
+	public function keep_agents_on_parent_sites( $can_add, $user_id, $role, $blog_id ) {
+		if ( true !== $can_add || ! self::is_agent( (int) $user_id ) ) {
+			return $can_add;
+		}
+
+		$parent = self::get_parent( (int) $user_id );
+		if ( null !== $parent && ( is_super_admin( $parent->ID ) || is_user_member_of_blog( $parent->ID, (int) $blog_id ) ) ) {
+			return $can_add;
+		}
+
+		return new WP_Error( 'wpai_agent_parent_not_member', __( 'An agent can only be added to sites its parent user belongs to.', 'ai' ) );
 	}
 
 	/**

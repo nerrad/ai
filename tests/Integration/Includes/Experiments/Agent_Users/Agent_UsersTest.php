@@ -895,8 +895,12 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$agent     = $this->account->provision( 'member_bound', 'author', 'member_bound@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
 
+		// A role written directly, as WP-CLI does, bypasses the membership rule for agents.
 		$foreign_site = (int) self::factory()->blog->create();
-		add_user_to_blog( $foreign_site, $agent->ID, 'author' );
+		switch_to_blog( $foreign_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Placing the agent on another site of the test network.
+		( new \WP_User( $agent->ID ) )->set_role( 'author' );
+		restore_current_blog();
+		$this->assertTrue( is_user_member_of_blog( $agent->ID, $foreign_site ) );
 
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 		add_filter( 'application_password_is_api_request', '__return_true' );
@@ -918,6 +922,40 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertWPError( $result, 'The credential should not authenticate where the agent is suspended.' );
 		$this->assertSame( 'wpai_agent_suspended', $result->get_error_code() );
 		$this->assertStringContainsString( 'not a member', $result->get_error_message() );
+	}
+
+	/**
+	 * Tests that an agent can join only sites its parent belongs to, unless the parent is a super admin.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_agent_joins_only_sites_of_its_parent() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'homebound_agent', 'author', 'homebound_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+		$site_id = (int) self::factory()->blog->create();
+
+		$refused = add_user_to_blog( $site_id, $agent->ID, 'author' );
+		$this->assertWPError( $refused );
+		$this->assertSame( 'wpai_agent_parent_not_member', $refused->get_error_code() );
+		$this->assertFalse( is_user_member_of_blog( $agent->ID, $site_id ) );
+
+		add_user_to_blog( $site_id, $parent_id, 'editor' );
+		$this->assertTrue( add_user_to_blog( $site_id, $agent->ID, 'author' ), 'The agent may join a site its parent belongs to.' );
+
+		$other_site = (int) self::factory()->blog->create();
+		grant_super_admin( $parent_id );
+		$added = add_user_to_blog( $other_site, $agent->ID, 'author' );
+		revoke_super_admin( $parent_id );
+		$this->assertTrue( $added, 'A super admin parent has authority on every site, so the agent may join any.' );
+
+		$this->assertTrue( add_user_to_blog( $other_site, $parent_id, 'editor' ), 'Humans are not affected.' );
 	}
 
 	/**
@@ -1141,11 +1179,15 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$delete_site = (int) self::factory()->blog->create();
 		$empty_site  = (int) self::factory()->blog->create();
 		$archived    = (int) self::factory()->blog->create();
+
+		// The agent joined these sites while its parent was a super admin.
+		grant_super_admin( $parent_id );
 		foreach ( array( $other_site, $delete_site, $archived ) as $site_id ) {
 			add_user_to_blog( $site_id, $agent->ID, 'author' );
 			add_user_to_blog( $site_id, $receiver_id, 'author' );
 		}
 		add_user_to_blog( $empty_site, $agent->ID, 'author' );
+		revoke_super_admin( $parent_id );
 		switch_to_blog( $archived ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Creating content on another site of the test network.
 		$this->create_post( $agent->ID, 'publish' );
 		restore_current_blog();
