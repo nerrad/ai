@@ -1198,6 +1198,44 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a network deletion giving content to an agent deleted in the same request stops before any change.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_network_deletion_rejects_agents_of_deleted_users_as_heirs() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$site_id     = get_current_blog_id();
+		$first_id    = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$second_id   = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$receiver_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent       = $this->account->provision( 'heir_agent', 'author', 'heir_agent@example.com', '', '', '', $second_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+
+		set_current_screen( 'users-network' );
+		$submit = function ( int $heir, string $choice ) use ( $site_id, $first_id, $second_id ): void {
+			$_REQUEST['action'] = 'dodelete';
+			$_POST              = array(
+				'_wpnonce' => wp_create_nonce( 'ms-users-delete' ),
+				'user'     => array( $first_id, $second_id ),
+				'blog'     => array( $first_id => array( $site_id => $heir ) ),
+				'delete'   => array( $site_id => array( $first_id => $choice ) ),
+			);
+			$this->account->reject_agents_as_network_heirs();
+		};
+
+		$submit( $receiver_id, 'reassign' );
+		$submit( $agent->ID, 'delete' );
+
+		$this->expectException( \WPDieException::class );
+		$submit( $agent->ID, 'reassign' );
+	}
+
+	/**
 	 * Tests that agent content follows the parent's "Delete all content" choice on the parent's sites.
 	 *
 	 * @since x.x.x
