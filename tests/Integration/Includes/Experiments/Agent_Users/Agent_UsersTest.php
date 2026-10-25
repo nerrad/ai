@@ -1353,7 +1353,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		switch_to_blog( $delete_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Reading content on another site of the test network.
 		$doomed_status = get_post_status( $doomed_id );
 		restore_current_blog();
-		$this->assertSame( 'trash', $doomed_status, 'Content on a site marked for deletion should be deleted like core deletes it.' );
+		$this->assertSame( 'publish', $doomed_status, 'Like core does for any user, "Delete all content" leaves the content on a site the user is removed from.' );
 	}
 
 	/**
@@ -1395,34 +1395,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$status = get_post_status( $post_id );
 		restore_current_blog();
 		$this->assertSame( 'trash', $status, 'The content should be deleted with the agent, like core deletes a user\'s content.' );
-	}
-
-	/**
-	 * Tests that agent content is only deleted for a network deletion request with a valid nonce.
-	 *
-	 * @since x.x.x
-	 *
-	 * @group ms-required
-	 */
-	public function test_multisite_agent_content_deletion_requires_the_delete_screen_nonce() {
-		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'This test requires a multisite installation.' );
-		}
-
-		$site_id   = get_current_blog_id();
-		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
-		$agent     = $this->account->provision( 'guarded_agent', 'author', 'guarded_agent@example.com', '', '', '', $parent_id );
-		$this->assertInstanceOf( \WP_User::class, $agent );
-		$post_id = $this->create_post( $agent->ID, 'publish' );
-
-		$_POST = array(
-			'_wpnonce' => 'forged',
-			'delete'   => array( $site_id => array( $parent_id => 'delete' ) ),
-		);
-		remove_user_from_blog( $parent_id, $site_id );
-		wpmu_delete_user( $parent_id );
-
-		$this->assertSame( 'publish', get_post_status( $post_id ), 'A forged deletion choice should not delete content.' );
 	}
 
 	/**
@@ -1526,13 +1498,13 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Tests that agent content follows the parent's "Delete all content" choice on the parent's sites.
+	 * Tests that the parent's "Delete all content" choice treats agent content exactly as core treats the parent's.
 	 *
 	 * @since x.x.x
 	 *
 	 * @group ms-required
 	 */
-	public function test_multisite_parent_delete_choice_deletes_agent_content_on_parent_sites() {
+	public function test_multisite_parent_delete_choice_treats_agent_content_like_the_parents() {
 		if ( ! is_multisite() ) {
 			$this->markTestSkipped( 'This test requires a multisite installation.' );
 		}
@@ -1541,7 +1513,8 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$agent     = $this->account->provision( 'tidy_agent', 'author', 'tidy_agent@example.com', '', '', '', $parent_id );
 		$this->assertInstanceOf( \WP_User::class, $agent );
-		$agent_post = $this->create_post( $agent->ID, 'publish' );
+		$parent_post = $this->create_post( $parent_id, 'publish' );
+		$agent_post  = $this->create_post( $agent->ID, 'publish' );
 
 		// Core's handler removes the parent from each site without a reassignment, then deletes the account.
 		$_POST = array(
@@ -1552,7 +1525,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		wpmu_delete_user( $parent_id );
 
 		$this->assertFalse( get_user_by( 'id', $agent->ID ), 'The agent is deleted with its parent.' );
-		$this->assertSame( 'trash', get_post_status( $agent_post ), 'Agent content should be deleted where the parent\'s content is.' );
+		$this->assertSame( get_post_status( $parent_post ), get_post_status( $agent_post ), 'Agent content should end up exactly where core leaves the parent\'s.' );
 	}
 
 	/**

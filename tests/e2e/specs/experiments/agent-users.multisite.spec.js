@@ -253,7 +253,7 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 		).rejects.toThrow( 'rest_user_invalid_id' );
 	} );
 
-	test( 'Deleting a parent can delete agent content on sites the parent does not belong to', async ( {
+	test( 'Deleting a parent applies "Delete all content" to agent content outside the parent sites as core does', async ( {
 		admin,
 		page,
 		requestUtils,
@@ -276,10 +276,14 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 			'User deleted'
 		);
 
-		const trashed = await siteRest( requestUtils, site.path, {
+		// Core removes the user from the site without deleting the content, for any user.
+		const kept = await siteRest( requestUtils, site.path, {
 			path: `/wp/v2/posts/${ post.id }`,
 			params: { context: 'edit' },
 		} );
-		expect( trashed.status ).toBe( 'trash' );
+		expect( kept.status ).toBe( 'publish' );
+		await expect(
+			siteRest( requestUtils, '', { path: `/wp/v2/users/${ agent.id }` } )
+		).rejects.toThrow( 'rest_user_invalid_id' );
 	} );
 } );

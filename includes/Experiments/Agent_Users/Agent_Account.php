@@ -1402,7 +1402,7 @@ final class Agent_Account {
 	 * Deletes a parent's agents together with the parent.
 	 *
 	 * Agent content follows the parent's: it is reassigned to the same user, or
-	 * deleted when the parent's content is. The parent's own agents cannot
+	 * otherwise treated exactly as core treats the parent's. The parent's own agents cannot
 	 * receive it, since they are deleted too. On multisite, `wp_delete_user()`
 	 * only removes the parent from the current site, so the agents are removed
 	 * from that site the same way.
@@ -1561,6 +1561,12 @@ final class Agent_Account {
 	/**
 	 * Deletes a parent's agents together with the parent across the network.
 	 *
+	 * Core's network delete handler has already applied the delete screen's
+	 * choices, for the parent's sites and for the agent's other sites, by
+	 * removing each user from them, with or without a reassignment. The agent
+	 * is deleted the same way the parent is, so its content ends up exactly
+	 * where core leaves the parent's.
+	 *
 	 * @since x.x.x
 	 *
 	 * @param int|string $user_id Deleted user ID.
@@ -1569,65 +1575,7 @@ final class Agent_Account {
 		$user_id = (int) $user_id;
 
 		foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
-			self::delete_agent_content_chosen_for_deletion( $agent_id, $user_id );
 			wpmu_delete_user( $agent_id );
-		}
-	}
-
-	/**
-	 * Deletes agent content on the sites where deletion was chosen.
-	 *
-	 * Core's network delete handler removes each user from the sites on the
-	 * delete screen before deleting the account. On the parent's sites the
-	 * agent is removed with the parent, and on its other sites the agent is
-	 * removed through the choice `render_agent_content_on_other_sites()` adds.
-	 * Removal without a reassignment leaves the content behind with a deleted
-	 * author, so wherever "Delete all content" was chosen, for the agent or for
-	 * its parent, the content is deleted here the way `wpmu_delete_user()`
-	 * deletes it on the agent's remaining sites.
-	 *
-	 * @since x.x.x
-	 *
-	 * @param int $agent_id  Agent user ID.
-	 * @param int $parent_id The agent's parent, whose choice the agent's content follows.
-	 */
-	private static function delete_agent_content_chosen_for_deletion( int $agent_id, int $parent_id ): void {
-		global $wpdb;
-
-		if (
-			! isset( $_POST['_wpnonce'], $_POST['delete'] ) ||
-			! is_array( $_POST['delete'] ) ||
-			! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'ms-users-delete' )
-		) {
-			return;
-		}
-
-		$choices = wp_unslash( $_POST['delete'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Only compared against a fixed value below.
-		foreach ( $choices as $site_id => $site_choices ) {
-			$site_id = (int) $site_id;
-			/*
-			 * Unlike `belongs_to_site()`, this skips only the active sites the
-			 * agent still belongs to: `wpmu_delete_user()` deletes the content
-			 * there, but skips archived, spam, and deleted sites.
-			 */
-			if (
-				! is_array( $site_choices ) ||
-				'delete' !== ( $site_choices[ $agent_id ] ?? $site_choices[ $parent_id ] ?? '' ) ||
-				is_user_member_of_blog( $agent_id, $site_id )
-			) {
-				continue;
-			}
-
-			switch_to_blog( $site_id ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Mirrors wpmu_delete_user() on that site.
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Mirrors wpmu_delete_user().
-			foreach ( $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_author = %d", $agent_id ) ) as $post_id ) {
-				wp_delete_post( (int) $post_id );
-			}
-			foreach ( $wpdb->get_col( $wpdb->prepare( "SELECT link_id FROM {$wpdb->links} WHERE link_owner = %d", $agent_id ) ) as $link_id ) {
-				wp_delete_link( (int) $link_id );
-			}
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			restore_current_blog();
 		}
 	}
 
@@ -1869,11 +1817,11 @@ final class Agent_Account {
 	 * Offers the content choice for agent sites the deleted parent does not belong to.
 	 *
 	 * The network delete screen only asks about the parent's own sites, so
-	 * agent content elsewhere would be deleted without the question ever being
-	 * asked. The fields reuse core's `delete[site][user]` and `blog[user][site]`
-	 * names, so core's own handler validates and applies the choice before it
-	 * deletes the accounts. Like core, a site without content or without
-	 * another user to receive it gets no choice.
+	 * agent content elsewhere could not be reassigned. The fields reuse core's
+	 * `delete[site][user]` and `blog[user][site]` names, so core's own handler
+	 * validates and applies the choice before it deletes the accounts, exactly
+	 * as it applies the choices for the parent. Like core, a site without
+	 * content or without another user to receive it gets no choice.
 	 *
 	 * @since x.x.x
 	 *
@@ -1885,7 +1833,7 @@ final class Agent_Account {
 
 		$rendered = false;
 		foreach ( $agents as $agent_id => $entry ) {
-			// Like core's own list, archived and spam sites are included. `wpmu_delete_user()` skips them, so without a choice the content there would be orphaned.
+			// Like core's own list, archived and spam sites are included, so the content there can be reassigned too.
 			foreach ( array_keys( get_blogs_of_user( $agent_id, true ) ) as $site_id ) {
 				$site_id = (int) $site_id;
 				if ( self::belongs_to_site( $entry['parent_id'], $site_id ) ) {
