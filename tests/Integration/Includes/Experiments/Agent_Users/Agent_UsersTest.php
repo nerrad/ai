@@ -2697,6 +2697,69 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests the profile note for an agent without a parent and for one whose parent is not a site member.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_profile_screen_explains_why_an_agent_is_suspended() {
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'explaining_agent', 'author', 'explaining_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+		$screen = new Profile_Screen();
+		$note   = static function () use ( $screen ): string {
+			ob_start();
+			$screen->render_account_type();
+			return (string) ob_get_clean();
+		};
+
+		set_current_screen( 'user-edit' );
+		$_GET['user_id'] = (string) $agent->ID;
+
+		if ( is_multisite() ) {
+			// A role written directly, as WP-CLI does, on a site the parent does not belong to.
+			$foreign_site = (int) self::factory()->blog->create();
+			switch_to_blog( $foreign_site ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.switch_to_blog_switch_to_blog -- Rendering the agent's profile on another site of the test network.
+			( new \WP_User( $agent->ID ) )->set_role( 'author' );
+			$foreign = $note();
+			restore_current_blog();
+			$this->assertStringContainsString( 'who is not a member of this site, so it is suspended here', $foreign );
+		}
+
+		delete_user_meta( $agent->ID, Agent_Account::META_PARENT );
+		$this->assertStringContainsString( 'It has no parent user, so it is suspended', $note() );
+	}
+
+	/**
+	 * Tests the notice right after an agent is created, with and without Application Passwords.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_profile_screen_points_to_the_first_credential() {
+		$agent  = $this->provision_agent( 'fresh_agent', 'author' );
+		$screen = new Profile_Screen();
+		$notice = static function () use ( $screen ): string {
+			ob_start();
+			$screen->render_created_notice();
+			return (string) ob_get_clean();
+		};
+
+		set_current_screen( 'user-edit' );
+		$_GET['user_id'] = (string) $agent->ID;
+		$this->assertSame( '', $notice(), 'The notice only follows creation.' );
+
+		$_GET['wpai_agent_created'] = '1';
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+		$this->assertStringContainsString( 'Add an Application Password below so the agent can connect.', $notice() );
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+		$unavailable = $notice();
+		remove_filter( 'wp_is_application_passwords_available', '__return_false' );
+		$this->assertStringContainsString( 'Application Passwords are not available on this site', $unavailable, 'Without HTTPS the parent learns why the agent cannot connect yet.' );
+		$this->assertStringContainsString( 'notice-warning', $unavailable );
+	}
+
+	/**
 	 * Tests that the network profile names the sites where an agent is suspended.
 	 *
 	 * @since x.x.x
