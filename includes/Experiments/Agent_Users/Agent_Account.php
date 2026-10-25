@@ -104,6 +104,24 @@ final class Agent_Account {
 	public const AGENTS_EXIST_OPTION = 'wpai_agents_exist';
 
 	/**
+	 * Capabilities agents never use, because they change other users.
+	 *
+	 * See `keep_agents_out_of_other_users()`.
+	 *
+	 * @since x.x.x
+	 *
+	 * @var array<int, string>
+	 */
+	private const USER_MANAGEMENT_CAPS = array( // phpcs:ignore SlevomatCodingStandard.Classes.DisallowMultiConstantDefinition -- A list of capabilities, same pattern as Experiments::EXPERIMENT_CLASSES.
+		'edit_users',
+		'promote_users',
+		'remove_users',
+		'delete_users',
+		'manage_network_users',
+		'manage_sites',
+	);
+
+	/**
 	 * Hooks the rules that apply before any agent is known into WordPress.
 	 *
 	 * Who may have agents is needed to choose the first agent's parent, and
@@ -176,7 +194,7 @@ final class Agent_Account {
 		add_filter( 'wp_is_application_passwords_available_for_user', array( $this, 'ensure_application_passwords' ), 10, 2 );
 		add_filter( 'map_meta_cap', array( $this, 'strip_unfiltered_html_from_agents' ), 10, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'map_parent_user_management' ), 10, 4 );
-		add_filter( 'map_meta_cap', array( $this, 'keep_agents_out_of_other_users' ), 10, 3 );
+		add_filter( 'map_meta_cap', array( $this, 'keep_agents_out_of_other_users' ), PHP_INT_MAX - 1, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'block_agent_credentials_without_network_safeguards' ), 10, 4 );
 		add_filter( 'map_meta_cap', array( $this, 'share_post_ownership' ), 10, 4 );
 		// Runs last so no other mapping can lift an agent above its parent.
@@ -709,8 +727,8 @@ final class Agent_Account {
 				continue;
 			}
 
-			// Agents never hold `unfiltered_html`, so it cannot represent escalation.
-			if ( in_array( 'unfiltered_html', $required, true ) ) {
+			// Agents never hold `unfiltered_html` or the capabilities to change other users, so these cannot represent escalation.
+			if ( in_array( 'unfiltered_html', $required, true ) || array() !== array_intersect( $required, self::USER_MANAGEMENT_CAPS ) ) {
 				continue;
 			}
 
@@ -1215,9 +1233,13 @@ final class Agent_Account {
 	 * other users, including assigning roles to accounts they create. Core
 	 * maps those actions on another user to `edit_users`, `promote_users`,
 	 * `remove_users`, and `delete_users`, so denying these covers every
-	 * target. Editing their own profile, including their own Application
-	 * Passwords, maps to no capability and stays available; changing their own
-	 * role needs `promote_users` and does not.
+	 * target. On multisite, the network screens also let `manage_network_users`
+	 * mark users as spam and `manage_sites` add users to sites with any role,
+	 * so those are denied too. Editing their own profile, including their own
+	 * Application Passwords, maps to no capability and stays available;
+	 * changing their own role needs `promote_users` and does not. It runs after
+	 * every other mapping but the parent ceiling, so no later mapping to these
+	 * capabilities escapes it.
 	 *
 	 * @since x.x.x
 	 *
@@ -1228,7 +1250,7 @@ final class Agent_Account {
 	 */
 	public function keep_agents_out_of_other_users( array $caps, string $cap, int $user_id ): array {
 		if (
-			array() === array_intersect( $caps, array( 'edit_users', 'promote_users', 'remove_users', 'delete_users' ) ) ||
+			array() === array_intersect( $caps, self::USER_MANAGEMENT_CAPS ) ||
 			! self::is_agent( $user_id )
 		) {
 			return $caps;

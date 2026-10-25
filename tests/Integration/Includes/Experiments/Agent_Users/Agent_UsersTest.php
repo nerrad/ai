@@ -656,6 +656,46 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that user administration capabilities never reach agents and do not limit their roles.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_user_administration_never_reaches_agents_nor_limits_their_roles() {
+		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
+			'helpdesk',
+			'Helpdesk',
+			array(
+				'read'                 => true,
+				'edit_posts'           => true,
+				'edit_users'           => true,
+				'manage_sites'         => true,
+				'manage_network_users' => true,
+			)
+		);
+		try {
+			// The parent cannot administer users, but the agent never could either, so the role fits.
+			$editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+			$bounded   = $this->account->provision( 'helpdesk_agent', 'helpdesk', 'helpdesk_agent@example.com', '', '', '', $editor_id );
+
+			if ( is_multisite() ) {
+				// A super admin parent holds every capability, so only the agent rule stands in the way.
+				$super_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+				grant_super_admin( $super_id );
+				$network_agent = $this->account->provision( 'network_helpdesk_agent', 'helpdesk', 'network_helpdesk_agent@example.com', '', '', '', $super_id );
+				$this->assertInstanceOf( \WP_User::class, $network_agent );
+				$this->assertFalse( user_can( $network_agent, 'manage_sites' ), 'An agent cannot add users to sites from the network screens.' );
+				$this->assertFalse( user_can( $network_agent, 'manage_network_users' ), 'An agent cannot mark users as spam from the network screens.' );
+				revoke_super_admin( $super_id );
+			}
+		} finally {
+			remove_role( 'helpdesk' );
+		}
+
+		$this->assertInstanceOf( \WP_User::class, $bounded, 'Capabilities the agent can never use should not count against its parent.' );
+		$this->assertFalse( user_can( $bounded, 'edit_users' ) );
+	}
+
+	/**
 	 * Tests that parents manage their agents and agents cannot manage parents.
 	 *
 	 * Runs on multisite too, where the parent is deliberately not a network
@@ -1330,13 +1370,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( sprintf( 'delete[%d][%d]', get_current_blog_id(), $agent->ID ), $output, 'Agent content on the parent\'s sites follows the parent\'s choice.' );
 
 		// Core's handler applies the choice per site, then deletes the account.
-		$_POST = array(
-			'_wpnonce' => wp_create_nonce( 'ms-users-delete' ),
-			'delete'   => array(
-				$other_site  => array( $agent->ID => 'reassign' ),
-				$delete_site => array( $agent->ID => 'delete' ),
-			),
-		);
 		remove_user_from_blog( $agent->ID, $other_site, $receiver_id );
 		remove_user_from_blog( $agent->ID, $delete_site );
 		remove_user_from_blog( $parent_id, get_current_blog_id() );
@@ -1517,10 +1550,6 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		$agent_post  = $this->create_post( $agent->ID, 'publish' );
 
 		// Core's handler removes the parent from each site without a reassignment, then deletes the account.
-		$_POST = array(
-			'_wpnonce' => wp_create_nonce( 'ms-users-delete' ),
-			'delete'   => array( $site_id => array( $parent_id => 'delete' ) ),
-		);
 		remove_user_from_blog( $parent_id, $site_id );
 		wpmu_delete_user( $parent_id );
 
