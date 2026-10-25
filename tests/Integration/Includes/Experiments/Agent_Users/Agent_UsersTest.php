@@ -968,6 +968,44 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that the confirmation for removing users from a site names their agents.
+	 *
+	 * @since x.x.x
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_remove_confirmation_names_agents_removed_too() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'This test requires a multisite installation.' );
+		}
+
+		$parent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$agent     = $this->account->provision( 'departing_agent', 'author', 'departing_agent@example.com', '', '', '', $parent_id );
+		$this->assertInstanceOf( \WP_User::class, $agent );
+
+		$render = function (): string {
+			ob_start();
+			$this->account->render_agents_removed_with_parent();
+			return (string) ob_get_clean();
+		};
+
+		$GLOBALS['pagenow'] = 'users.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Simulating the core admin screen.
+		$_REQUEST['action'] = 'remove';
+		$_REQUEST['user']   = (string) $parent_id;
+		$this->assertStringContainsString( 'Their agents will be removed from this site too: departing_agent.', $render() );
+
+		// The bulk action posts the list and the lower action selector.
+		unset( $_REQUEST['user'] );
+		$_REQUEST['action']  = '-1';
+		$_REQUEST['action2'] = 'remove';
+		$_REQUEST['users']   = array( (string) $parent_id );
+		$this->assertStringContainsString( 'departing_agent', $render() );
+
+		$_REQUEST['users'] = array( (string) $this->admin_id );
+		$this->assertSame( '', $render(), 'Users without agents need no warning.' );
+	}
+
+	/**
 	 * Tests that an agent can join only sites its parent belongs to, unless the parent is a super admin.
 	 *
 	 * @since x.x.x

@@ -189,6 +189,7 @@ final class Agent_Account {
 		add_filter( 'pre_update_site_option_site_admins', array( $this, 'strip_agents_from_super_admins' ) );
 		add_filter( 'can_add_user_to_blog', array( $this, 'keep_agents_on_parent_sites' ), 10, 4 );
 		add_action( 'remove_user_from_blog', array( $this, 'remove_agents_of_removed_user' ), 10, 3 );
+		add_action( 'admin_notices', array( $this, 'render_agents_removed_with_parent' ) );
 		add_action( 'wpmu_delete_user', array( $this, 'delete_agents_of_deleted_network_user' ) );
 		add_action( 'load-users.php', array( $this, 'reject_agents_as_network_heirs' ) );
 	}
@@ -1433,6 +1434,61 @@ final class Agent_Account {
 
 			remove_user_from_blog( $agent_id, $blog_id, $reassign );
 		}
+	}
+
+	/**
+	 * Names the agents removed from the site along with their parents.
+	 *
+	 * Core's confirmation for removing users from a site has no hook of its
+	 * own, so the warning uses the notices area above it.
+	 *
+	 * @since x.x.x
+	 */
+	public function render_agents_removed_with_parent(): void {
+		global $pagenow;
+
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Reading the confirmation screen's request to describe it; core verifies the removal.
+		$action = sanitize_key( wp_unslash( $_REQUEST['action'] ?? '' ) );
+		if ( '' === $action || '-1' === $action ) {
+			$action = sanitize_key( wp_unslash( $_REQUEST['action2'] ?? '' ) );
+		}
+		if ( 'users.php' !== $pagenow || is_network_admin() || 'remove' !== $action ) {
+			return;
+		}
+
+		$user_ids = isset( $_REQUEST['users'] ) ? wp_parse_id_list( wp_unslash( $_REQUEST['users'] ) ) : wp_parse_id_list( wp_unslash( $_REQUEST['user'] ?? '' ) );
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+		$names = array();
+		foreach ( $user_ids as $user_id ) {
+			foreach ( self::get_agent_ids( $user_id ) as $agent_id ) {
+				$agent = get_userdata( $agent_id );
+				// Core already lists agents removed in their own right.
+				if ( ! $agent instanceof WP_User || in_array( $agent_id, $user_ids, true ) || ! is_user_member_of_blog( $agent_id ) ) {
+					continue;
+				}
+
+				$names[] = $agent->user_login;
+			}
+		}
+
+		if ( array() === $names ) {
+			return;
+		}
+
+		wp_admin_notice(
+			esc_html(
+				wp_sprintf(
+					/* translators: %l: Comma-separated list of agent usernames. */
+					__( 'Their agents will be removed from this site too: %l.', 'ai' ),
+					$names
+				)
+			),
+			array(
+				'type'        => 'warning',
+				'dismissible' => false,
+			)
+		);
 	}
 
 	/**
