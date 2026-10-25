@@ -79,8 +79,9 @@ function ai_e2e_register_credentials_endpoint() {
 /**
  * Registers REST endpoints for multisite fixtures.
  *
- * POST /ai-e2e/v1/sites      — creates the site at `slug`, or returns the existing one.
- * POST /ai-e2e/v1/site-users — adds `user_id` to `site_id` with `role`.
+ * POST /ai-e2e/v1/sites        — creates the site at `slug`, or returns the existing one.
+ * POST /ai-e2e/v1/site-users   — adds `user_id` to `site_id` with `role`.
+ * POST /ai-e2e/v1/super-admins — grants `user_id` super admin status, or revokes it when `grant` is false.
  */
 function ai_e2e_register_multisite_endpoints() {
 	if ( ! is_multisite() ) {
@@ -131,6 +132,40 @@ function ai_e2e_register_multisite_endpoints() {
 			),
 		)
 	);
+
+	register_rest_route(
+		'ai-e2e/v1',
+		'/super-admins',
+		array(
+			'methods'             => 'POST',
+			'callback'            => 'ai_e2e_set_super_admin',
+			'permission_callback' => function () {
+				return current_user_can( 'manage_network_users' );
+			},
+			'args'                => array(
+				'user_id' => array(
+					'type'     => 'integer',
+					'required' => true,
+				),
+				'grant'   => array(
+					'type'     => 'boolean',
+					'required' => true,
+				),
+			),
+		)
+	);
+}
+
+/**
+ * Grants or revokes super admin status.
+ *
+ * @param WP_REST_Request $request The request.
+ * @return WP_REST_Response
+ */
+function ai_e2e_set_super_admin( WP_REST_Request $request ) {
+	$changed = $request['grant'] ? grant_super_admin( $request['user_id'] ) : revoke_super_admin( $request['user_id'] );
+
+	return new WP_REST_Response( array( 'changed' => $changed ) );
 }
 
 /**

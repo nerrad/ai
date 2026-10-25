@@ -45,6 +45,20 @@ const addToSite = ( requestUtils, siteId, userId, role ) =>
 	} );
 
 /**
+ * Grants or revokes super admin status.
+ *
+ * @param {Object}  requestUtils Request utils of the network administrator.
+ * @param {number}  userId       User ID.
+ * @param {boolean} grant        Whether to grant the status.
+ */
+const setSuperAdmin = ( requestUtils, userId, grant ) =>
+	requestUtils.rest( {
+		method: 'POST',
+		path: '/ai-e2e/v1/super-admins',
+		data: { user_id: userId, grant },
+	} );
+
+/**
  * Starts deleting a user from the network and opens the confirmation screen.
  *
  * @param {Object} page     Page fixture.
@@ -63,6 +77,9 @@ const openNetworkDeleteScreen = async ( page, username ) => {
 /**
  * Sets up a parent on the main site whose agent owns a post on another site.
  *
+ * Agents only join their parent's sites, or any site while the parent is a
+ * super admin, so the parent is one while the agent joins the other site.
+ *
  * @param {Object} admin        Admin fixture.
  * @param {Object} page         Page fixture.
  * @param {Object} requestUtils Request utils of the network administrator.
@@ -80,7 +97,9 @@ const setUpAgentContentOutsideParentSites = async (
 		role: 'author',
 	} );
 	const site = await createSite( requestUtils );
+	await setSuperAdmin( requestUtils, parent.id, true );
 	await addToSite( requestUtils, site.id, agent.id, 'author' );
+	await setSuperAdmin( requestUtils, parent.id, false );
 	await addToSite( requestUtils, site.id, receiver.id, 'author' );
 	const post = await siteRest( requestUtils, site.path, {
 		method: 'POST',
