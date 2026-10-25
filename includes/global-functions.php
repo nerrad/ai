@@ -15,6 +15,10 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Checks whether a user account is an agent.
  *
+ * Part of the Agent Users experiment: the name may change, or the function
+ * may be removed, while the experiment settles. The function only exists
+ * while the plugin is active, so check with `function_exists()` first.
+ *
  * @since x.x.x
  *
  * @param \WP_User|int $user User object or user ID.
@@ -26,6 +30,10 @@ function wpai_is_agent_user( $user ): bool {
 
 /**
  * Returns the user an agent account acts on behalf of.
+ *
+ * Part of the Agent Users experiment: the name may change, or the function
+ * may be removed, while the experiment settles. The function only exists
+ * while the plugin is active, so check with `function_exists()` first.
  *
  * @since x.x.x
  *

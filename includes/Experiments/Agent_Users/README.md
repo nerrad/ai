@@ -67,8 +67,10 @@ WP-CLI is intentionally outside these runtime restrictions. An operator using `w
 
 ## Developer reference
 
+The global helpers are part of the experiment, so their names may change, or they may be removed, while it settles. They only exist while the plugin is active.
+
 ```php
-if ( wpai_is_agent_user( $user_id ) ) {
+if ( function_exists( 'wpai_is_agent_user' ) && wpai_is_agent_user( $user_id ) ) {
 	// Apply agent-specific presentation or behavior.
 	$parent = wpai_get_agent_parent( $user_id ); // WP_User|null.
 }
