@@ -183,6 +183,8 @@ test.describe( 'Agent Users Experiment on multisite', () => {
 
 		const mainSite = await createDraft( '' );
 		expect( mainSite.status, JSON.stringify( mainSite.body ) ).toBe( 401 );
+		// A wrong or revoked credential would be a 401 as well; this one is suspended here.
+		expect( mainSite.body.code ).toBe( 'wpai_agent_suspended' );
 		const otherSite = await createDraft( site.path );
 		expect( otherSite.status, JSON.stringify( otherSite.body ) ).toBe(
 			201
