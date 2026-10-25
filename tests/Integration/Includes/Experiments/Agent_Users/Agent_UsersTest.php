@@ -687,7 +687,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 			}
 		}
 
-		// A role that manages users without managing the site, which agents may hold.
+		// Even a role that manages users gives an agent no say over other accounts.
 		add_role( // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.custom_role_add_role -- Registering a throwaway role in an integration test.
 			'user_manager',
 			'User Manager',
@@ -703,11 +703,28 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		try {
 			$manager_agent   = $this->provision_agent( 'manager_child', 'user_manager' );
 			$manager_control = self::factory()->user->create( array( 'role' => 'user_manager' ) );
-			$this->assertSame( user_can( $manager_control, 'edit_user', $other_id ), user_can( $manager_agent, 'edit_user', $other_id ), 'A user-managing agent keeps exactly its role\'s access to other users.' );
-			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
-				// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
-				$this->assertFalse( user_can( $manager_agent, $capability, $this->admin_id ), sprintf( 'An agent should never %s its own parent.', $capability ) );
+			$stranger_id     = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+			if ( ! is_multisite() ) {
+				$this->assertTrue( user_can( $manager_control, 'edit_user', $stranger_id ), 'A person with the same role edits other users.' );
 			}
+			foreach ( array( 'edit_user', 'promote_user', 'remove_user', 'delete_user' ) as $capability ) {
+				foreach ( array( $this->admin_id, $stranger_id ) as $target_id ) {
+					// phpcs:ignore WordPress.WP.Capabilities.Undetermined -- Checking each user management capability.
+					$this->assertFalse( user_can( $manager_agent, $capability, $target_id ), sprintf( 'An agent should never %s user %d.', $capability, $target_id ) );
+				}
+			}
+			$this->assertFalse( user_can( $manager_agent, 'promote_users' ), 'An agent cannot assign roles, so it cannot give one to a user it creates.' );
+			$this->assertTrue( user_can( $manager_agent, 'edit_user', $manager_agent->ID ), 'An agent still edits its own profile.' );
+			$this->assertTrue( user_can( $manager_agent, 'create_app_password', $manager_agent->ID ), 'An agent still manages its own credentials.' );
+			$this->assertFalse( user_can( $manager_agent, 'promote_user', $manager_agent->ID ), 'An agent cannot change its own role.' );
+
+			// The same holds over REST.
+			wp_set_current_user( $manager_agent->ID );
+			$request = new WP_REST_Request( 'POST', '/wp/v2/users/' . $stranger_id );
+			$request->set_param( 'first_name', 'Renamed' );
+			$response = rest_do_request( $request );
+			wp_set_current_user( $this->admin_id );
+			$this->assertSame( 403, $response->get_status() );
 		} finally {
 			remove_role( 'user_manager' );
 		}

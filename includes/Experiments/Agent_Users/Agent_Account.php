@@ -176,6 +176,7 @@ final class Agent_Account {
 		add_filter( 'wp_is_application_passwords_available_for_user', array( $this, 'ensure_application_passwords' ), 10, 2 );
 		add_filter( 'map_meta_cap', array( $this, 'strip_unfiltered_html_from_agents' ), 10, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'map_parent_user_management' ), 10, 4 );
+		add_filter( 'map_meta_cap', array( $this, 'keep_agents_out_of_other_users' ), 10, 3 );
 		add_filter( 'map_meta_cap', array( $this, 'block_agent_credentials_without_network_safeguards' ), 10, 4 );
 		add_filter( 'map_meta_cap', array( $this, 'share_post_ownership' ), 10, 4 );
 		// Runs last so no other mapping can lift an agent above its parent.
@@ -1192,6 +1193,35 @@ final class Agent_Account {
 		}
 
 		$error->add( 'wpai_agent_suspended', $messages[ $reason ] );
+	}
+
+	/**
+	 * Keeps agents from changing any account but their own.
+	 *
+	 * Whatever their role, agents cannot edit, promote, remove, or delete
+	 * other users, including assigning roles to accounts they create. Core
+	 * maps those actions on another user to `edit_users`, `promote_users`,
+	 * `remove_users`, and `delete_users`, so denying these covers every
+	 * target. Editing their own profile, including their own Application
+	 * Passwords, maps to no capability and stays available; changing their own
+	 * role needs `promote_users` and does not.
+	 *
+	 * @since x.x.x
+	 *
+	 * @param array<int, string> $caps    Primitive capabilities resolved by `map_meta_cap()`.
+	 * @param string             $cap     The capability being checked.
+	 * @param int                $user_id The user the check runs for.
+	 * @return array<int, string> Filtered primitive capabilities.
+	 */
+	public function keep_agents_out_of_other_users( array $caps, string $cap, int $user_id ): array {
+		if (
+			array() === array_intersect( $caps, array( 'edit_users', 'promote_users', 'remove_users', 'delete_users' ) ) ||
+			! self::is_agent( $user_id )
+		) {
+			return $caps;
+		}
+
+		return array( 'do_not_allow' );
 	}
 
 	/**
