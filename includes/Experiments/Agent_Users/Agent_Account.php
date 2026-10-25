@@ -118,8 +118,9 @@ final class Agent_Account {
 	/**
 	 * Checks whether any agent may exist, without querying users on every request.
 	 *
-	 * The answer is stored when first computed and set again whenever an
-	 * account is marked as an agent. It may stay `true` after the last agent
+	 * The answer is computed on activation, or on the first request when the
+	 * activation hook never ran, and set again whenever an account is marked
+	 * as an agent. It may stay `true` after the last agent
 	 * is gone, which only keeps the safeguards running; it is never `false`
 	 * while an agent exists, except for agents written straight to the
 	 * database while the plugin was active, which activation detects.

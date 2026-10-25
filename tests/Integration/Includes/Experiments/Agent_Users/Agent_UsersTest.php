@@ -1969,7 +1969,7 @@ class Agent_UsersTest extends WP_UnitTestCase {
 	public function test_agents_exist_flag_is_computed_when_missing_and_on_activation() {
 		$this->provision_agent( 'flagged_agent', 'author' );
 
-		// An install upgraded from a build without the flag.
+		// An install whose activation hook never ran, such as one loading the plugin as a must-use plugin.
 		delete_site_option( Agent_Account::AGENTS_EXIST_OPTION );
 		$this->assertTrue( Agent_Account::agents_may_exist() );
 		$this->assertSame( '1', get_site_option( Agent_Account::AGENTS_EXIST_OPTION ), 'The computed answer should be stored.' );
