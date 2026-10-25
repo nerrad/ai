@@ -1763,8 +1763,19 @@ final class Agent_Account {
 			$agents
 		);
 
-		echo '<p class="wpai-agents-deleted-with-parent"><strong>' . esc_html__( 'Their agents will be deleted too:', 'ai' ) . '</strong> ' . esc_html( implode( ', ', $names ) ) . '. ';
-		echo esc_html__( 'Agent content follows the choice above.', 'ai' ) . '</p>';
+		$message = wp_sprintf(
+			/* translators: %l: Comma-separated list of agent usernames. */
+			__( 'Their agents will be deleted too: %l.', 'ai' ),
+			array_values( $names )
+		);
+		if ( is_network_admin() ) {
+			// The choice is made per site there.
+			$message .= ' ' . __( 'On their parents\' sites, agent content follows the choice made for the parent on that site.', 'ai' );
+		} elseif ( $this->count_agent_content( false, $user_ids ) ) {
+			$message .= ' ' . __( 'Agent content follows the choice above.', 'ai' );
+		}
+
+		echo '<p class="wpai-agents-deleted-with-parent">' . esc_html( $message ) . '</p>';
 
 		if ( ! is_network_admin() ) {
 			return;

@@ -1204,6 +1204,12 @@ class Agent_UsersTest extends WP_UnitTestCase {
 		// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Invoking core hooks in an integration test.
 		$this->assertFalse( apply_filters( 'users_have_additional_content', false, array( $parent_id ) ), 'No content yet.' );
 
+		ob_start();
+		do_action( 'delete_user_form', wp_get_current_user(), array( $parent_id ) );
+		$output = (string) ob_get_clean();
+		$this->assertStringContainsString( 'Their agents will be deleted too:', $output, 'The agents are named even without content.' );
+		$this->assertStringNotContainsString( 'choice above', $output, 'Without content, core offers no choice to refer to.' );
+
 		$this->create_post( $agent->ID, 'draft' );
 		$this->assertTrue( apply_filters( 'users_have_additional_content', false, array( $parent_id ) ), 'The agent\'s content should trigger the reassignment choice.' );
 		$this->assertFalse( apply_filters( 'users_have_additional_content', false, array( $childless ) ), 'Agents without content change nothing.' );
@@ -1215,6 +1221,11 @@ class Agent_UsersTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( 'Their agents will be deleted too:', $output );
 		$this->assertStringContainsString( $agent->user_login, $output );
+		if ( is_multisite() ) {
+			return;
+		}
+
+		$this->assertStringContainsString( 'Agent content follows the choice above.', $output );
 	}
 
 	/**
